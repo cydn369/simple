@@ -12,10 +12,11 @@ import plotly.graph_objects as go
 
 def load_tickers_from_file(filename):
     """
-    Read comma-separated tickers from a text file in the same folder as app.py.
+    Read comma-separated tickers from a text file relative to the current working directory.
     """
     try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
+        # Use current working directory instead of __file__
+        base_dir = os.getcwd()
         filepath = os.path.join(base_dir, filename)
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
