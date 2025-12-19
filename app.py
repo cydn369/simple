@@ -710,7 +710,7 @@ with st.sidebar:
     )
 
     if ticker_source == "Nifty50 (file)":
-        current_tickers = load_tickers_from_file("nifty50.txt")
+        current_tickers = load_tickers_from_file("Nifty50.txt")
         if current_tickers:
             st.info(f"Using {len(current_tickers)} Nifty50 tickers from nifty50.txt.")
         else:
@@ -718,7 +718,7 @@ with st.sidebar:
         uploaded_file = None
 
     elif ticker_source == "Nifty500 (file)":
-        current_tickers = load_tickers_from_file("nifty500.txt")
+        current_tickers = load_tickers_from_file("Nifty500.txt")
         if current_tickers:
             st.info(f"Using {len(current_tickers)} Nifty500 tickers from nifty500.txt.")
         else:
