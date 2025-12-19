@@ -6,20 +6,26 @@ from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
 
 # ======================================
-# Default Nifty 50 tickers
+# Default Nifty tickers from local files
 # ======================================
-NIFTY50_TICKERS = [
-    'RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'HINDUNILVR.NS',
-    'ICICIBANK.NS', 'KOTAKBANK.NS', 'BHARTIARTL.NS', 'ITC.NS', 'SBIN.NS',
-    'LT.NS', 'ASIANPAINT.NS', 'AXISBANK.NS', 'MARUTI.NS', 'SUNPHARMA.NS',
-    'TITAN.NS', 'HCLTECH.NS', 'ULTRACEMCO.NS', 'NESTLEIND.NS', 'WIPRO.NS',
-    'TECHM.NS', 'POWERGRID.NS', 'NTPC.NS', 'ONGC.NS', 'TATAMOTORS.NS',
-    'JSWSTEEL.NS', 'TATACONSUM.NS', 'DIVISLAB.NS', 'BAJFINANCE.NS', 'GRASIM.NS',
-    'CIPLA.NS', 'DRREDDY.NS', 'COALINDIA.NS', 'EICHERMOT.NS', 'HEROMOTOCO.NS',
-    'BRITANNIA.NS', 'SHRIRAMFIN.NS', 'BAJAJFINSV.NS', 'HDFCLIFE.NS', 'ADANIPORTS.NS',
-    'APOLLOHOSP.NS', 'BAJAJ-AUTO.NS', 'INDUSINDBK.NS', 'LTIM.NS', 'M&M.NS',
-    'ADANIENT.NS', 'HINDALCO.NS', 'SBILIFE.NS', 'BEL.NS', 'JIOFIN.NS'
-]
+
+def load_tickers_from_file(filename):
+    """
+    Read comma-separated tickers from a text file in the same folder as app.py.
+    """
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        filepath = os.path.join(base_dir, filename)
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+        tickers = []
+        for line in content.strip().split("\n"):
+            line_tickers = [t.strip().upper() for t in line.split(",") if t.strip()]
+            tickers.extend(line_tickers)
+        return sorted(set(tickers))
+    except Exception as e:
+        st.error(f"Error loading {filename}: {e}")
+        return []
 
 
 # ======================================
@@ -695,22 +701,34 @@ if "selected_ticker" not in st.session_state:
 # Sidebar: ticker universe + screening filters
 with st.sidebar:
     st.header("📋 Ticker Universe")
-
     ticker_source = st.radio(
         "Select ticker source:",
-        ["Nifty50 (default)", "Upload custom CSV/TXT"],
+        ["Nifty50 (file)", "Nifty500 (file)", "Upload custom CSV/TXT"],
         index=0
     )
 
-    if ticker_source == "Nifty50 (default)":
-        current_tickers = NIFTY50_TICKERS
-        st.info(f"Using {len(current_tickers)} Nifty50 tickers as default universe.")
+    if ticker_source == "Nifty50 (file)":
+        current_tickers = load_tickers_from_file("nifty50.txt")
+        if current_tickers:
+            st.info(f"Using {len(current_tickers)} Nifty50 tickers from nifty50.txt.")
+        else:
+            st.warning("nifty50.txt is empty or could not be loaded.")
         uploaded_file = None
+
+    elif ticker_source == "Nifty500 (file)":
+        current_tickers = load_tickers_from_file("nifty500.txt")
+        if current_tickers:
+            st.info(f"Using {len(current_tickers)} Nifty500 tickers from nifty500.txt.")
+        else:
+            st.warning("nifty500.txt is empty or could not be loaded.")
+        uploaded_file = None
+
     else:
         uploaded_file = st.file_uploader(
             "Upload tickers file (comma-separated)",
             type=["csv", "txt"]
         )
+
         if uploaded_file is not None:
             current_tickers = parse_ticker_file(uploaded_file)
             st.success(f"Loaded {len(current_tickers)} unique tickers from file.")
