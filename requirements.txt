@@ -4,4 +4,4 @@ numpy
 requests
 yfinance
 plotly
-st_aggrid
+streamlit-aggrid
