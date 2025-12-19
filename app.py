@@ -7,15 +7,15 @@ from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
 
 # ======================================
-# Default Nifty tickers from local files
+# Load Nifty tickers from local files
 # ======================================
 
 def load_tickers_from_file(filename):
     """
     Read comma-separated tickers from a text file relative to the current working directory.
+    Example: nifty50.txt, nifty500.txt
     """
     try:
-        # Use current working directory instead of __file__
         base_dir = os.getcwd()
         filepath = os.path.join(base_dir, filename)
         with open(filepath, "r", encoding="utf-8") as f:
@@ -33,10 +33,12 @@ def load_tickers_from_file(filename):
 # ======================================
 # Simple trend utilities
 # ======================================
+
 def prior_trend(prices, lookback=14):
     if len(prices) < lookback:
         return "N/A"
     return "Uptrend" if prices.iloc[-1] > prices.iloc[-lookback] else "Downtrend"
+
 
 def prior_volume_trend(volumes, lookback=10):
     if len(volumes) < 2 * lookback:
@@ -45,9 +47,11 @@ def prior_volume_trend(volumes, lookback=10):
     prior = volumes.iloc[-2 * lookback:-lookback].mean()
     return "Increasing" if recent > prior else "Decreasing"
 
+
 # ======================================
 # Chart indicators (candlestick patterns)
 # ======================================
+
 def bullish_marubozu(hist):
     if len(hist) < 2:
         return False
@@ -59,6 +63,7 @@ def bullish_marubozu(hist):
     confirm = hist.iloc[-1]
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > h
     return pattern_ok and confirm_ok
+
 
 def bearish_marubozu(hist):
     if len(hist) < 2:
@@ -72,6 +77,7 @@ def bearish_marubozu(hist):
     confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < l
     return pattern_ok and confirm_ok
 
+
 def doji(hist):
     if len(hist) < 1:
         return False
@@ -80,6 +86,7 @@ def doji(hist):
     if rng == 0:
         return False
     return abs(last["Close"] - last["Open"]) <= 0.2 * rng
+
 
 def hammer(hist):
     if len(hist) < 2:
@@ -92,6 +99,7 @@ def hammer(hist):
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
     return pattern_ok and confirm_ok
 
+
 def inverted_hammer(hist):
     if len(hist) < 2:
         return False
@@ -102,6 +110,7 @@ def inverted_hammer(hist):
     pattern_ok = upper_shadow >= 1.5 * body and lower_shadow <= 1.5 * body
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
     return pattern_ok and confirm_ok
+
 
 def bullish_engulfing(hist):
     if len(hist) < 3:
@@ -116,6 +125,7 @@ def bullish_engulfing(hist):
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
     return pattern_ok and confirm_ok
 
+
 def bearish_engulfing(hist):
     if len(hist) < 3:
         return False
@@ -128,6 +138,7 @@ def bearish_engulfing(hist):
     )
     confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < pattern["Low"]
     return pattern_ok and confirm_ok
+
 
 def morning_star(hist):
     if len(hist) < 4:
@@ -143,6 +154,7 @@ def morning_star(hist):
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > c["High"]
     return pattern_ok and confirm_ok
 
+
 def evening_star(hist):
     if len(hist) < 4:
         return False
@@ -157,6 +169,7 @@ def evening_star(hist):
     confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < c["Low"]
     return pattern_ok and confirm_ok
 
+
 def piercing_line(hist):
     if len(hist) < 3:
         return False
@@ -170,6 +183,7 @@ def piercing_line(hist):
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
     return pattern_ok and confirm_ok
 
+
 def dark_cloud_cover(hist):
     if len(hist) < 3:
         return False
@@ -182,6 +196,7 @@ def dark_cloud_cover(hist):
     )
     confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < pattern["Low"]
     return pattern_ok and confirm_ok
+
 
 def spinning_top(hist):
     if len(hist) < 1:
@@ -199,21 +214,21 @@ def spinning_top(hist):
         lower_shadow >= 0.5 * body
     )
 
+
 def rising_three_methods(hist):
     if len(hist) < 5:
         return False
     a, b, c, d, e = hist.iloc[-5], hist.iloc[-4], hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
     cond1 = a["Close"] > a["Open"] and (a["Close"] - a["Open"]) > (a["High"] - a["Low"]) * 0.6
     cond2 = all([
-        (
-            candle["High"] <= a["High"] and
-            candle["Low"] >= a["Low"] and
-            abs(candle["Close"] - candle["Open"]) < (a["Close"] - a["Open"]) * 0.5
-        )
+        candle["High"] <= a["High"] and
+        candle["Low"] >= a["Low"] and
+        abs(candle["Close"] - candle["Open"]) < (a["Close"] - a["Open"]) * 0.5
         for candle in [b, c, d]
     ])
     cond3 = e["Close"] > e["Open"] and e["Close"] > a["Close"]
     return cond1 and cond2 and cond3
+
 
 def abandoned_baby(hist):
     if len(hist) < 3:
@@ -235,6 +250,7 @@ def abandoned_baby(hist):
     )
     return bullish or bearish
 
+
 def three_inside_up(hist):
     if len(hist) < 3:
         return False
@@ -247,6 +263,7 @@ def three_inside_up(hist):
     )
     cond3 = c["Close"] > c["Open"] and c["Close"] > a["Open"]
     return cond1 and cond2 and cond3
+
 
 def three_inside_down(hist):
     if len(hist) < 3:
@@ -261,6 +278,7 @@ def three_inside_down(hist):
     cond3 = c["Close"] < c["Open"] and c["Close"] < a["Open"]
     return cond1 and cond2 and cond3
 
+
 def bullish_tasuki_gap(hist):
     if len(hist) < 3:
         return False
@@ -273,6 +291,7 @@ def bullish_tasuki_gap(hist):
     )
     cond3 = c["Close"] > c["Open"] and c["Close"] > a["Close"]
     return cond1 and cond2 and cond3
+
 
 def bearish_tasuki_gap(hist):
     if len(hist) < 3:
@@ -287,20 +306,20 @@ def bearish_tasuki_gap(hist):
     cond3 = c["Close"] < c["Open"] and c["Close"] < a["Close"]
     return cond1 and cond2 and cond3
 
+
 def mat_hold(hist):
     if len(hist) < 5:
         return False
     a, b, c, d, e = hist.iloc[-5], hist.iloc[-4], hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
     cond1 = a["Close"] > a["Open"] and (a["Close"] - a["Open"]) > (a["High"] - a["Low"]) * 0.6
     cond2 = all([
-        (
-            abs(candle["Close"] - candle["Open"]) < (a["Close"] - a["Open"]) * 0.5 and
-            candle["Low"] > a["Open"]
-        )
+        abs(candle["Close"] - candle["Open"]) < (a["Close"] - a["Open"]) * 0.5 and
+        candle["Low"] > a["Open"]
         for candle in [b, c, d]
     ])
     cond3 = e["Close"] > e["Open"] and e["Close"] > a["Close"]
     return cond1 and cond2 and cond3
+
 
 def kicking(hist):
     if len(hist) < 2:
@@ -322,6 +341,7 @@ def kicking(hist):
     gap_down = (a["Close"] > a["Open"] and b["Open"] < a["Low"])
     return cond1 and cond2 and (gap_up or gap_down)
 
+
 def three_white_soldiers(hist):
     if len(hist) < 3:
         return False
@@ -337,6 +357,7 @@ def three_white_soldiers(hist):
     cond2 = is_strong_bullish(b) and b["Open"] >= a["Open"] and b["Open"] <= a["Close"] and b["Close"] > a["Close"]
     cond3 = is_strong_bullish(c) and c["Open"] >= b["Open"] and c["Open"] <= b["Close"] and c["Close"] > b["Close"]
     return cond1 and cond2 and cond3
+
 
 def three_black_crows(hist):
     if len(hist) < 3:
@@ -354,6 +375,7 @@ def three_black_crows(hist):
     cond3 = is_strong_bearish(c) and c["Open"] <= b["Open"] and c["Open"] >= b["Close"] and c["Close"] < b["Close"]
     return cond1 and cond2 and cond3
 
+
 def rising_window(hist):
     if len(hist) < 2:
         return False
@@ -363,6 +385,7 @@ def rising_window(hist):
     cond3 = b["Low"] > a["High"]
     return cond1 and cond2 and cond3
 
+
 def falling_window(hist):
     if len(hist) < 2:
         return False
@@ -371,6 +394,7 @@ def falling_window(hist):
     cond2 = b["Close"] < b["Open"]
     cond3 = b["High"] < a["Low"]
     return cond1 and cond2 and cond3
+
 
 def bullish_separating_lines(hist):
     if len(hist) < 2:
@@ -385,6 +409,7 @@ def bullish_separating_lines(hist):
     cond4 = b["Close"] > a["Close"]
     return cond1 and cond2 and cond3 and cond4
 
+
 def bearish_separating_lines(hist):
     if len(hist) < 2:
         return False
@@ -398,6 +423,7 @@ def bearish_separating_lines(hist):
     cond4 = b["Close"] < a["Close"]
     return cond1 and cond2 and cond3 and cond4
 
+
 def upside_gap_two_crows(hist):
     if len(hist) < 3:
         return False
@@ -406,6 +432,7 @@ def upside_gap_two_crows(hist):
     cond2 = (b["Close"] < b["Open"] and b["Open"] > a["Close"] and b["Close"] > a["Close"])
     cond3 = (c["Close"] < c["Open"] and c["Open"] > b["Open"] and c["Close"] < b["Close"] and c["Close"] > a["Close"])
     return cond1 and cond2 and cond3
+
 
 def on_neck(hist):
     if len(hist) < 2:
@@ -419,6 +446,7 @@ def on_neck(hist):
     cond3 = b["Open"] < a["Close"] and abs(b["Close"] - a["Close"]) <= 0.1 * rng
     return cond1 and cond2 and cond3
 
+
 def in_neck(hist):
     if len(hist) < 2:
         return False
@@ -427,6 +455,7 @@ def in_neck(hist):
     cond2 = b["Close"] > b["Open"]
     cond3 = b["Open"] < a["Close"] and b["Close"] > a["Close"] and b["Close"] < a["Open"]
     return cond1 and cond2 and cond3
+
 
 def thrusting(hist):
     if len(hist) < 2:
@@ -437,6 +466,7 @@ def thrusting(hist):
     cond2 = b["Close"] > b["Open"]
     cond3 = b["Open"] < a["Close"] and b["Close"] > midpoint and b["Close"] < a["Open"]
     return cond1 and cond2 and cond3
+
 
 def deliberation(hist):
     if len(hist) < 3:
@@ -454,9 +484,11 @@ def deliberation(hist):
     )
     return cond1 and cond2 and cond3
 
+
 # ======================================
 # Technical indicators
 # ======================================
+
 def rsi(hist, period=14):
     if len(hist) < period + 1:
         return None
@@ -469,6 +501,7 @@ def rsi(hist, period=14):
     rsi_series = 100 - (100 / (1 + rs))
     return float(rsi_series.iloc[-1])
 
+
 def macd(hist, fast=12, slow=26, signal=9):
     if len(hist) < slow + signal:
         return None
@@ -478,6 +511,7 @@ def macd(hist, fast=12, slow=26, signal=9):
     signal_line = macd_line.ewm(span=signal).mean()
     return float(macd_line.iloc[-1]), float(signal_line.iloc[-1])
 
+
 def golden_cross(hist):
     if len(hist) < 200:
         return False
@@ -485,12 +519,14 @@ def golden_cross(hist):
     ma200 = hist["Close"].rolling(200).mean()
     return ma50.iloc[-2] <= ma200.iloc[-2] and ma50.iloc[-1] > ma200.iloc[-1]
 
+
 def death_cross(hist):
     if len(hist) < 200:
         return False
     ma50 = hist["Close"].rolling(50).mean()
     ma200 = hist["Close"].rolling(200).mean()
     return ma50.iloc[-2] >= ma200.iloc[-2] and ma50.iloc[-1] < ma200.iloc[-1]
+
 
 def bollinger_breakout(hist, period=20, num_std=2):
     if len(hist) < period + 1:
@@ -500,6 +536,7 @@ def bollinger_breakout(hist, period=20, num_std=2):
     upper = ma + num_std * std
     return hist["Close"].iloc[-2] <= upper.iloc[-2] and hist["Close"].iloc[-1] > upper.iloc[-1]
 
+
 def bollinger_breakdown(hist, period=20, num_std=2):
     if len(hist) < period + 1:
         return False
@@ -508,101 +545,115 @@ def bollinger_breakdown(hist, period=20, num_std=2):
     lower = ma - num_std * std
     return hist["Close"].iloc[-2] >= lower.iloc[-2] and hist["Close"].iloc[-1] < lower.iloc[-1]
 
+
 def volume_spike(hist, lookback=20):
     if len(hist) < lookback:
         return False
     avg_vol = hist["Volume"].rolling(lookback).mean().iloc[-1]
     return hist["Volume"].iloc[-1] > 1.5 * avg_vol
 
+
 # ======================================
 # Financial indicators
 # ======================================
+
 def marketcap_gt_1b(info):
     return info.get("marketCap", 0) > 1_000_000_000
+
 
 def marketcap_lt_1b(info):
     return info.get("marketCap", 0) < 1_000_000_000
 
+
 def pe_lt_20(info):
     return info.get("trailingPE", 999) < 20
+
 
 def pe_gt_40(info):
     return info.get("trailingPE", 0) > 40
 
+
 def eps_positive_growth(info):
     return info.get("earningsGrowth", 0) > 0
+
 
 def eps_negative_growth(info):
     return info.get("earningsGrowth", 0) < 0
 
+
 def dividend_yield_gt_2(info):
     return info.get("dividendYield", 0) and info["dividendYield"] > 0.02
+
 
 def debt_equity_lt_1(info):
     return info.get("debtToEquity", 999) < 1
 
+
 # ======================================
 # Indicator mapping
 # ======================================
+
 INDICATOR_CHECKS = {
     # Chart patterns
-    "Bullish_Marubozu": lambda hist, info: bullish_marubozu(hist),
-    "Bearish_Marubozu": lambda hist, info: bearish_marubozu(hist),
-    "Doji": lambda hist, info: doji(hist),
-    "Hammer": lambda hist, info: hammer(hist),
-    "Inverted_Hammer": lambda hist, info: inverted_hammer(hist),
-    "Bullish_Engulfing": lambda hist, info: bullish_engulfing(hist),
-    "Bearish_Engulfing": lambda hist, info: bearish_engulfing(hist),
-    "Morning_Star": lambda hist, info: morning_star(hist),
-    "Evening_Star": lambda hist, info: evening_star(hist),
-    "Piercing_Line": lambda hist, info: piercing_line(hist),
-    "Dark_Cloud_Cover": lambda hist, info: dark_cloud_cover(hist),
-    "Spinning_Top": lambda hist, info: spinning_top(hist),
-    "Rising_Three_Methods": lambda hist, info: rising_three_methods(hist),
-    "Abandoned_Baby": lambda hist, info: abandoned_baby(hist),
-    "Three_Inside_Up": lambda hist, info: three_inside_up(hist),
-    "Three_Inside_Down": lambda hist, info: three_inside_down(hist),
-    "Bullish_Tasuki_Gap": lambda hist, info: bullish_tasuki_gap(hist),
-    "Bearish_Tasuki_Gap": lambda hist, info: bearish_tasuki_gap(hist),
-    "Mat_Hold": lambda hist, info: mat_hold(hist),
-    "Kicking": lambda hist, info: kicking(hist),
-    "Three_White_Soldiers": lambda hist, info: three_white_soldiers(hist),
-    "Three_Black_Crows": lambda hist, info: three_black_crows(hist),
-    "Rising_Window": lambda hist, info: rising_window(hist),
-    "Falling_Window": lambda hist, info: falling_window(hist),
+    "Bullish_Marubozu":       lambda hist, info: bullish_marubozu(hist),
+    "Bearish_Marubozu":       lambda hist, info: bearish_marubozu(hist),
+    "Doji":                   lambda hist, info: doji(hist),
+    "Hammer":                 lambda hist, info: hammer(hist),
+    "Inverted_Hammer":        lambda hist, info: inverted_hammer(hist),
+    "Bullish_Engulfing":      lambda hist, info: bullish_engulfing(hist),
+    "Bearish_Engulfing":      lambda hist, info: bearish_engulfing(hist),
+    "Morning_Star":           lambda hist, info: morning_star(hist),
+    "Evening_Star":           lambda hist, info: evening_star(hist),
+    "Piercing_Line":          lambda hist, info: piercing_line(hist),
+    "Dark_Cloud_Cover":       lambda hist, info: dark_cloud_cover(hist),
+    "Spinning_Top":           lambda hist, info: spinning_top(hist),
+    "Rising_Three_Methods":   lambda hist, info: rising_three_methods(hist),
+    "Abandoned_Baby":         lambda hist, info: abandoned_baby(hist),
+    "Three_Inside_Up":        lambda hist, info: three_inside_up(hist),
+    "Three_Inside_Down":      lambda hist, info: three_inside_down(hist),
+    "Bullish_Tasuki_Gap":     lambda hist, info: bullish_tasuki_gap(hist),
+    "Bearish_Tasuki_Gap":     lambda hist, info: bearish_tasuki_gap(hist),
+    "Mat_Hold":               lambda hist, info: mat_hold(hist),
+    "Kicking":                lambda hist, info: kicking(hist),
+    "Three_White_Soldiers":   lambda hist, info: three_white_soldiers(hist),
+    "Three_Black_Crows":      lambda hist, info: three_black_crows(hist),
+    "Rising_Window":          lambda hist, info: rising_window(hist),
+    "Falling_Window":         lambda hist, info: falling_window(hist),
     "Bullish_Separating_Lines": lambda hist, info: bullish_separating_lines(hist),
     "Bearish_Separating_Lines": lambda hist, info: bearish_separating_lines(hist),
-    "Upside_Gap_Two_Crows": lambda hist, info: upside_gap_two_crows(hist),
-    "On_Neck": lambda hist, info: on_neck(hist),
-    "In_Neck": lambda hist, info: in_neck(hist),
-    "Thrusting": lambda hist, info: thrusting(hist),
-    "Deliberation": lambda hist, info: deliberation(hist),
+    "Upside_Gap_Two_Crows":   lambda hist, info: upside_gap_two_crows(hist),
+    "On_Neck":                lambda hist, info: on_neck(hist),
+    "In_Neck":                lambda hist, info: in_neck(hist),
+    "Thrusting":              lambda hist, info: thrusting(hist),
+    "Deliberation":           lambda hist, info: deliberation(hist),
 
     # Technical
-    "RSI_Overbought": lambda hist, info: (rsi(hist) is not None) and rsi(hist) > 70,
-    "RSI_Oversold": lambda hist, info: (rsi(hist) is not None) and rsi(hist) < 30,
-    "MACD_Bullish": lambda hist, info: (macd(hist) is not None) and macd(hist)[0] > macd(hist)[1],
-    "MACD_Bearish": lambda hist, info: (macd(hist) is not None) and macd(hist)[0] < macd(hist)[1],
-    "Golden_Cross": lambda hist, info: golden_cross(hist),
-    "Death_Cross": lambda hist, info: death_cross(hist),
-    "Bollinger_Breakout": lambda hist, info: bollinger_breakout(hist),
-    "Bollinger_Breakdown": lambda hist, info: bollinger_breakdown(hist),
-    "Volume_Spike": lambda hist, info: volume_spike(hist),
+    "RSI_Overbought":         lambda hist, info: (rsi(hist) is not None) and rsi(hist) > 70,
+    "RSI_Oversold":           lambda hist, info: (rsi(hist) is not None) and rsi(hist) < 30,
+    "MACD_Bullish":           lambda hist, info: (macd(hist) is not None) and macd(hist)[0] > macd(hist)[1],
+    "MACD_Bearish":           lambda hist, info: (macd(hist) is not None) and macd(hist)[0] < macd(hist)[1],
+    "Golden_Cross":           lambda hist, info: golden_cross(hist),
+    "Death_Cross":            lambda hist, info: death_cross(hist),
+    "Bollinger_Breakout":     lambda hist, info: bollinger_breakout(hist),
+    "Bollinger_Breakdown":    lambda hist, info: bollinger_breakdown(hist),
+    "Volume_Spike":           lambda hist, info: volume_spike(hist),
 
     # Financial
-    "MarketCap_Gt_1B": lambda hist, info: marketcap_gt_1b(info),
-    "MarketCap_Lt_1B": lambda hist, info: marketcap_lt_1b(info),
-    "PE_Lt_20": lambda hist, info: pe_lt_20(info),
-    "PE_Gt_40": lambda hist, info: pe_gt_40(info),
-    "EPS_Positive_Growth": lambda hist, info: eps_positive_growth(info),
-    "EPS_Negative_Growth": lambda hist, info: eps_negative_growth(info),
-    "DividendYield_Gt_2": lambda hist, info: dividend_yield_gt_2(info),
-    "DebtEquity_Lt_1": lambda hist, info: debt_equity_lt_1(info),
+    "MarketCap_Gt_1B":        lambda hist, info: marketcap_gt_1b(info),
+    "MarketCap_Lt_1B":        lambda hist, info: marketcap_lt_1b(info),
+    "PE_Lt_20":               lambda hist, info: pe_lt_20(info),
+    "PE_Gt_40":               lambda hist, info: pe_gt_40(info),
+    "EPS_Positive_Growth":    lambda hist, info: eps_positive_growth(info),
+    "EPS_Negative_Growth":    lambda hist, info: eps_negative_growth(info),
+    "DividendYield_Gt_2":     lambda hist, info: dividend_yield_gt_2(info),
+    "DebtEquity_Lt_1":        lambda hist, info: debt_equity_lt_1(info),
 }
+
 
 # ======================================
 # Data fetch and ticker parsing
 # ======================================
+
 @st.cache_data
 def fetch_stock_data(ticker):
     """Fetch data once per ticker and compute all indicators."""
@@ -610,7 +661,6 @@ def fetch_stock_data(ticker):
         stock = yf.Ticker(ticker)
         info = stock.info
         hist = stock.history(period="1y")
-
         if not info or hist.empty:
             return None
 
@@ -636,6 +686,7 @@ def fetch_stock_data(ticker):
         st.warning(f"Error fetching {ticker}: {e}")
         return None
 
+
 def parse_ticker_file(uploaded_file):
     try:
         content = uploaded_file.read().decode("utf-8")
@@ -648,9 +699,9 @@ def parse_ticker_file(uploaded_file):
         st.error(f"Error parsing file: {e}")
         return []
 
+
 def plot_candlestick(symbol, period="6mo", around_date=None):
     ticker = yf.Ticker(symbol)
-
     if around_date is not None:
         if isinstance(around_date, str):
             around_date = pd.to_datetime(around_date)
@@ -667,7 +718,6 @@ def plot_candlestick(symbol, period="6mo", around_date=None):
         return
 
     hist = hist.reset_index()
-
     fig = go.Figure(
         data=[
             go.Candlestick(
@@ -688,140 +738,201 @@ def plot_candlestick(symbol, period="6mo", around_date=None):
         template="plotly_white",
         height=500,
     )
+
     st.plotly_chart(fig, use_container_width=True)
 
 
 # ======================================
-# Streamlit app
+# Pages
 # ======================================
-st.set_page_config(page_title="Nifty50 Advanced Stock Screener", layout="wide")
-st.title("📈 Road to Runway")
-if "selected_ticker" not in st.session_state:
-    st.session_state["selected_ticker"] = None
 
+def page_screener():
+    st.title("📈 Road to Runway")
 
-# Sidebar: ticker universe + screening filters
-with st.sidebar:
-    st.header("📋 Ticker Universe")
-    ticker_source = st.radio(
-        "Select ticker source:",
-        ["Nifty50 (file)", "Nifty500 (file)", "Upload custom CSV/TXT"],
-        index=0
-    )
+    if "selected_ticker" not in st.session_state:
+        st.session_state["selected_ticker"] = None
 
-    if ticker_source == "Nifty50 (file)":
-        current_tickers = load_tickers_from_file("Nifty50.txt")
-        if current_tickers:
-            st.info(f"Using {len(current_tickers)} Nifty50 tickers from nifty50.txt.")
-        else:
-            st.warning("nifty50.txt is empty or could not be loaded.")
-        uploaded_file = None
-
-    elif ticker_source == "Nifty500 (file)":
-        current_tickers = load_tickers_from_file("Nifty500.txt")
-        if current_tickers:
-            st.info(f"Using {len(current_tickers)} Nifty500 tickers from nifty500.txt.")
-        else:
-            st.warning("nifty500.txt is empty or could not be loaded.")
-        uploaded_file = None
-
-    else:
-        uploaded_file = st.file_uploader(
-            "Upload tickers file (comma-separated)",
-            type=["csv", "txt"]
-        )
-
-        if uploaded_file is not None:
-            current_tickers = parse_ticker_file(uploaded_file)
-            st.success(f"Loaded {len(current_tickers)} unique tickers from file.")
-        else:
-            current_tickers = []
-            st.warning("Upload a ticker file to proceed.")
-
-    st.header("🎯 Screening Filters")
-    selected_indicators = st.multiselect(
-        "Select indicators (ANY match):",
-        options=sorted(INDICATOR_CHECKS.keys()),
-        default=[]
-    )
-
-    run_screen = st.button("🚀 Fetch & Analyze Data", type="primary")
-
-# Main area: only screening results
-if run_screen and current_tickers:
-    st.write(f"Fetching 1-year data for {len(current_tickers)} tickers...")
-    prog = st.progress(0)
-
-    def _fetch_with_progress(tickers):
-        results = []
-        total = len(tickers)
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            for i, res in enumerate(executor.map(fetch_stock_data, tickers), 1):
-                if res is not None:
-                    results.append(res)
-                prog.progress(i / total)
-        return results
-
-    results = _fetch_with_progress(current_tickers)
-    df = pd.DataFrame(results)
-
-    if df.empty:
-        st.error("No valid data retrieved. Try different tickers.")
-    else:
-        st.success(f"Analyzed {len(df)} stocks. Screening ready.")
-        st.session_state["screening_df"] = df
-
-if "screening_df" in st.session_state:
-    df = st.session_state["screening_df"].copy()
-
-    st.subheader("📊 Screening Results")
-
-    if selected_indicators:
-        mask = df[selected_indicators].any(axis=1)
-        filtered_df = df[mask].copy()
-        st.caption(f"Filtered by {len(selected_indicators)} indicator(s); showing stocks that match ANY of them.")
-    else:
-        filtered_df = df.copy()
-        st.caption("No indicators selected; showing all analyzed stocks.")
-
-    if filtered_df.empty:
-        st.warning("No stocks match the current screening conditions.")
-    else:
-        st.write(f"Found **{len(filtered_df)}** matching stocks.")
-        st.dataframe(filtered_df, use_container_width=True, height=400)
-
-        # ---- Ticker selection for chart ----
-        tickers_in_result = filtered_df["Ticker"].tolist()
-        selected_symbol = st.selectbox(
-            "Click/choose a ticker to view its chart:",
-            options=["(none)"] + tickers_in_result,
+    # Sidebar: ticker universe + screening filters
+    with st.sidebar:
+        st.header("📋 Ticker Universe")
+        ticker_source = st.radio(
+            "Select ticker source:",
+            ["Nifty50 (file)", "Nifty500 (file)", "Upload custom CSV/TXT"],
             index=0,
         )
 
-        if selected_symbol != "(none)":
-            st.session_state["selected_ticker"] = selected_symbol
+        if ticker_source == "Nifty50 (file)":
+            current_tickers = load_tickers_from_file("nifty50.txt")
+            if current_tickers:
+                st.info(f"Using {len(current_tickers)} Nifty50 tickers from nifty50.txt.")
+            else:
+                st.warning("nifty50.txt is empty or could not be loaded.")
+            uploaded_file = None
 
-        # Quick metrics
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Total analyzed", len(df))
-        with c2:
-            st.metric("Matches", len(filtered_df))
-        with c3:
-            mean_rsi = filtered_df["RSI"].mean()
-            st.metric("Average RSI", f"{mean_rsi:.1f}" if not np.isnan(mean_rsi) else "N/A")
+        elif ticker_source == "Nifty500 (file)":
+            current_tickers = load_tickers_from_file("nifty500.txt")
+            if current_tickers:
+                st.info(f"Using {len(current_tickers)} Nifty500 tickers from nifty500.txt.")
+            else:
+                st.warning("nifty500.txt is empty or could not be loaded.")
+            uploaded_file = None
 
-        csv_data = filtered_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "💾 Download results as CSV",
-            data=csv_data,
-            file_name="nifty50_screener_results.csv",
-            mime="text/csv"
+        else:
+            uploaded_file = st.file_uploader(
+                "Upload tickers file (comma-separated)",
+                type=["csv", "txt"],
+            )
+            if uploaded_file is not None:
+                current_tickers = parse_ticker_file(uploaded_file)
+                st.success(f"Loaded {len(current_tickers)} unique tickers from file.")
+            else:
+                current_tickers = []
+                st.warning("Upload a ticker file to proceed.")
+
+        st.header("🎯 Screening Filters")
+        selected_indicators = st.multiselect(
+            "Select indicators (ANY match):",
+            options=sorted(INDICATOR_CHECKS.keys()),
+            default=[],
         )
 
-# ---- Chart rendering below the table ----
-if st.session_state.get("selected_ticker"):
-    st.markdown("---")
-    st.subheader(f"📉 Chart for {st.session_state['selected_ticker']}")
-    plot_candlestick(st.session_state["selected_ticker"])
+        run_screen = st.button("🚀 Fetch & Analyze Data", type="primary")
 
+    # Main area: screening results
+    if run_screen and current_tickers:
+        st.write(f"Fetching 1-year data for {len(current_tickers)} tickers...")
+        prog = st.progress(0)
+
+        def _fetch_with_progress(tickers):
+            results = []
+            total = len(tickers)
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                for i, res in enumerate(executor.map(fetch_stock_data, tickers), 1):
+                    if res is not None:
+                        results.append(res)
+                    prog.progress(i / total)
+            return results
+
+        results = _fetch_with_progress(current_tickers)
+        df = pd.DataFrame(results)
+
+        if df.empty:
+            st.error("No valid data retrieved. Try different tickers.")
+        else:
+            st.success(f"Analyzed {len(df)} stocks. Screening ready.")
+            st.session_state["screening_df"] = df
+
+    if "screening_df" in st.session_state:
+        df = st.session_state["screening_df"].copy()
+        st.subheader("📊 Screening Results")
+
+        if selected_indicators:
+            mask = df[selected_indicators].any(axis=1)
+            filtered_df = df[mask].copy()
+            st.caption(
+                f"Filtered by {len(selected_indicators)} indicator(s); showing stocks that match ANY of them."
+            )
+        else:
+            filtered_df = df.copy()
+            st.caption("No indicators selected; showing all analyzed stocks.")
+
+        if filtered_df.empty:
+            st.warning("No stocks match the current screening conditions.")
+        else:
+            st.write(f"Found **{len(filtered_df)}** matching stocks.")
+            st.dataframe(filtered_df, use_container_width=True, height=400)
+
+            # ---- Ticker selection for chart ----
+            tickers_in_result = filtered_df["Ticker"].tolist()
+            selected_symbol = st.selectbox(
+                "Click/choose a ticker to view its chart:",
+                options=["(none)"] + tickers_in_result,
+                index=0,
+            )
+
+            if selected_symbol != "(none)":
+                st.session_state["selected_ticker"] = selected_symbol
+
+            # Quick metrics
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Total analyzed", len(df))
+            with c2:
+                st.metric("Matches", len(filtered_df))
+            with c3:
+                mean_rsi = filtered_df["RSI"].mean()
+                st.metric("Average RSI", f"{mean_rsi:.1f}" if not np.isnan(mean_rsi) else "N/A")
+
+            csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "💾 Download results as CSV",
+                data=csv_data,
+                file_name="screener_results.csv",
+                mime="text/csv",
+            )
+
+            # ---- Chart rendering below the table ----
+            if st.session_state.get("selected_ticker"):
+                st.markdown("---")
+                st.subheader(f"📉 Chart for {st.session_state['selected_ticker']}")
+                plot_candlestick(st.session_state["selected_ticker"])
+
+
+def page_dashboard():
+    st.title("📊 Dashboard")
+
+    # Simple placeholders; you can wire these to real data later
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Watchlist", 0)
+    with col2:
+        st.metric("Open Paper Positions", len(st.session_state.get("paper_trades", [])))
+    with col3:
+        st.metric("Paper P&L", "0.0%")
+
+    st.write("Use this page later to show aggregates from your screener and paper trades.")
+
+
+def page_paper_trading():
+    st.title("📝 Paper Trading")
+
+    if "paper_trades" not in st.session_state:
+        st.session_state["paper_trades"] = []
+
+    with st.form("paper_trade_form"):
+        ticker = st.text_input("Ticker (e.g. RELIANCE.NS)")
+        side = st.selectbox("Side", ["Buy", "Sell"])
+        qty = st.number_input("Quantity", min_value=1, value=1)
+        price = st.number_input("Price", min_value=0.0, value=0.0, format="%.2f")
+        submitted = st.form_submit_button("Add Trade")
+
+    if submitted and ticker and price > 0:
+        st.session_state["paper_trades"].append(
+            {"Ticker": ticker.upper(), "Side": side, "Qty": qty, "Price": price}
+        )
+        st.success("Trade added to paper ledger.")
+
+    trades = st.session_state["paper_trades"]
+    if trades:
+        trades_df = pd.DataFrame(trades)
+        st.subheader("Paper Trade Ledger")
+        st.dataframe(trades_df, use_container_width=True)
+
+
+# ======================================
+# Main app entry
+# ======================================
+
+st.set_page_config(page_title="Road to Runway", layout="wide")
+
+page = st.sidebar.selectbox(
+    "Select page",
+    ["Screener", "Dashboard", "Paper Trading"],
+)
+
+if page == "Screener":
+    page_screener()
+elif page == "Dashboard":
+    page_dashboard()
+elif page == "Paper Trading":
+    page_paper_trading()
