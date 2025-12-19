@@ -1,371 +1,805 @@
-"""
-Paper Trading Simulator — load from public Google Sheet, manual-save workflow
-
-Behavior:
-- On startup the app attempts to load trades from the public Google Sheet CSV export:
-  https://docs.google.com/spreadsheets/d/<SHEET_ID>/export?format=csv
-  (Your sheet id: 1UV0zUkIpJ1e1BwdgOlvRQxHTVZuxsT4xbwOmw5K3Lq4)
-- The app runs in single-user mode and keeps trades in session_state.
-- When you press "Save changes" the app prepares an updated CSV and offers it for download.
-  AFTER downloading, you must manually upload/replace the Google Sheet content (instructions shown).
-- No credentials/service account required: this reads the public sheet only and relies on manual upload to persist.
-
-Usage:
-- Install deps: pip install -r requirements.txt
-- Run: streamlit run app.py
-"""
-from __future__ import annotations
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import numpy as np
-import requests
-import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
-from datetime import datetime
-from io import StringIO, BytesIO
-from typing import List, Dict, Optional
-import time
 
-st.set_page_config(page_title="Paper Trading (Google Sheet load; manual save)", layout="wide")
+# ======================================
+# Default Nifty 50 tickers
+# ======================================
+NIFTY50_TICKERS = [
+    'RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'HINDUNILVR.NS',
+    'ICICIBANK.NS', 'KOTAKBANK.NS', 'BHARTIARTL.NS', 'ITC.NS', 'SBIN.NS',
+    'LT.NS', 'ASIANPAINT.NS', 'AXISBANK.NS', 'MARUTI.NS', 'SUNPHARMA.NS',
+    'TITAN.NS', 'HCLTECH.NS', 'ULTRACEMCO.NS', 'NESTLEIND.NS', 'WIPRO.NS',
+    'TECHM.NS', 'POWERGRID.NS', 'NTPC.NS', 'ONGC.NS', 'TATAMOTORS.NS',
+    'JSWSTEEL.NS', 'TATACONSUM.NS', 'DIVISLAB.NS', 'BAJFINANCE.NS', 'GRASIM.NS',
+    'CIPLA.NS', 'DRREDDY.NS', 'COALINDIA.NS', 'EICHERMOT.NS', 'HEROMOTOCO.NS',
+    'BRITANNIA.NS', 'SHRIRAMFIN.NS', 'BAJAJFINSV.NS', 'HDFCLIFE.NS', 'ADANIPORTS.NS',
+    'APOLLOHOSP.NS', 'BAJAJ-AUTO.NS', 'INDUSINDBK.NS', 'LTIM.NS', 'M&M.NS'
+]
 
-# Google Sheet public CSV export URL (your sheet id)
-SHEET_ID = "1UV0zUkIpJ1e1BwdgOlvRQxHTVZuxsT4xbwOmw5K3Lq4"
-SHEET_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+# ======================================
+# Simple trend utilities
+# ======================================
+def prior_trend(prices, lookback=14):
+    if len(prices) < lookback:
+        return "N/A"
+    return "Uptrend" if prices.iloc[-1] > prices.iloc[-lookback] else "Downtrend"
 
-# -----------------------
-# Utilities
-# -----------------------
-def now_iso():
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+def prior_volume_trend(volumes, lookback=10):
+    if len(volumes) < 2 * lookback:
+        return "N/A"
+    recent = volumes.iloc[-lookback:].mean()
+    prior = volumes.iloc[-2 * lookback:-lookback].mean()
+    return "Increasing" if recent > prior else "Decreasing"
 
-def sanitize_ticker(t: str) -> str:
-    return str(t).strip().upper().strip(",")
+# ======================================
+# Chart indicators (candlestick patterns)
+# ======================================
+def bullish_marubozu(hist):
+    if len(hist) < 2:
+        return False
+    o, h, l, c = hist.iloc[-2][["Open", "High", "Low", "Close"]]
+    body = c - o
+    if body <= 0:
+        return False
+    pattern_ok = (h - c <= 0.05 * body) and (o - l <= 0.05 * body)
+    confirm = hist.iloc[-1]
+    confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > h
+    return pattern_ok and confirm_ok
 
-def ensure_state():
-    if "cash" not in st.session_state:
-        st.session_state.cash = 100000.0
-    if "trades" not in st.session_state:
-        st.session_state.trades: List[Dict] = []
-    if "settings" not in st.session_state:
-        st.session_state.settings = {"commission": 0.0}
-    if "last_prices" not in st.session_state:
-        st.session_state.last_prices = {}
+def bearish_marubozu(hist):
+    if len(hist) < 2:
+        return False
+    o, h, l, c = hist.iloc[-2][["Open", "High", "Low", "Close"]]
+    body = o - c
+    if body <= 0:
+        return False
+    pattern_ok = (h - o <= 0.05 * body) and (c - l <= 0.05 * body)
+    confirm = hist.iloc[-1]
+    confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < l
+    return pattern_ok and confirm_ok
 
-def trade_list_to_df(trades: List[Dict]) -> pd.DataFrame:
-    if not trades:
-        return pd.DataFrame(columns=["id","ticker","side","qty","price","commission","timestamp"])
-    return pd.DataFrame(trades)
+def doji(hist):
+    if len(hist) < 1:
+        return False
+    last = hist.iloc[-1]
+    rng = last["High"] - last["Low"]
+    if rng == 0:
+        return False
+    return abs(last["Close"] - last["Open"]) <= 0.2 * rng
 
-def df_to_trade_list(df: pd.DataFrame) -> List[Dict]:
-    expected = ["id","ticker","side","qty","price","commission","timestamp"]
-    for col in expected:
-        if col not in df.columns:
-            df[col] = None
-    trades = []
-    for _, row in df.iterrows():
-        try:
-            t = {
-                "id": int(row["id"]) if pd.notna(row["id"]) else None,
-                "ticker": sanitize_ticker(row["ticker"]),
-                "side": str(row["side"]).lower(),
-                "qty": float(row["qty"]) if pd.notna(row["qty"]) else 0.0,
-                "price": float(row["price"]) if pd.notna(row["price"]) else 0.0,
-                "commission": float(row.get("commission", 0.0) or 0.0),
-                "timestamp": str(row["timestamp"]) if pd.notna(row["timestamp"]) else now_iso()
-            }
-            trades.append(t)
-        except Exception:
-            continue
-    max_id = max([t["id"] for t in trades if t["id"] is not None], default=0)
-    for t in trades:
-        if t["id"] is None:
-            max_id += 1
-            t["id"] = max_id
-    return trades
+def hammer(hist):
+    if len(hist) < 2:
+        return False
+    pattern, confirm = hist.iloc[-2], hist.iloc[-1]
+    body = abs(pattern["Close"] - pattern["Open"])
+    upper_shadow = pattern["High"] - max(pattern["Open"], pattern["Close"])
+    lower_shadow = min(pattern["Open"], pattern["Close"]) - pattern["Low"]
+    pattern_ok = lower_shadow >= 1.5 * body and upper_shadow <= 1.5 * body
+    confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
+    return pattern_ok and confirm_ok
 
-# -----------------------
-# Google Sheets (public CSV) loader
-# -----------------------
-def fetch_trades_from_public_sheet(url: str, timeout: int = 15) -> (List[Dict], Optional[str]):
-    """
-    Fetch CSV text from a public Google Sheets export URL and parse to trade list.
-    Returns (trades_list, error_string). If error_string is None, load succeeded.
-    """
-    headers = {"User-Agent": "Mozilla/5.0"}
+def inverted_hammer(hist):
+    if len(hist) < 2:
+        return False
+    pattern, confirm = hist.iloc[-2], hist.iloc[-1]
+    body = abs(pattern["Close"] - pattern["Open"])
+    upper_shadow = pattern["High"] - max(pattern["Open"], pattern["Close"])
+    lower_shadow = min(pattern["Open"], pattern["Close"]) - pattern["Low"]
+    pattern_ok = upper_shadow >= 1.5 * body and lower_shadow <= 1.5 * body
+    confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
+    return pattern_ok and confirm_ok
+
+def bullish_engulfing(hist):
+    if len(hist) < 3:
+        return False
+    prev, pattern, confirm = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    pattern_ok = (
+        prev["Close"] < prev["Open"] and
+        pattern["Close"] > pattern["Open"] and
+        pattern["Open"] <= prev["Close"] and
+        pattern["Close"] >= prev["Open"]
+    )
+    confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
+    return pattern_ok and confirm_ok
+
+def bearish_engulfing(hist):
+    if len(hist) < 3:
+        return False
+    prev, pattern, confirm = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    pattern_ok = (
+        prev["Close"] > prev["Open"] and
+        pattern["Close"] < pattern["Open"] and
+        pattern["Open"] >= prev["Close"] and
+        pattern["Close"] <= prev["Open"]
+    )
+    confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < pattern["Low"]
+    return pattern_ok and confirm_ok
+
+def morning_star(hist):
+    if len(hist) < 4:
+        return False
+    a, b, c, confirm = hist.iloc[-4], hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    pattern_ok = (
+        a["Close"] < a["Open"] and
+        abs(b["Close"] - b["Open"]) < abs(a["Open"] - a["Close"]) * 0.5 and
+        b["Close"] < a["Close"] and
+        c["Close"] > c["Open"] and
+        c["Close"] > (a["Open"] + a["Close"]) / 2
+    )
+    confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > c["High"]
+    return pattern_ok and confirm_ok
+
+def evening_star(hist):
+    if len(hist) < 4:
+        return False
+    a, b, c, confirm = hist.iloc[-4], hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    pattern_ok = (
+        a["Close"] > a["Open"] and
+        abs(b["Close"] - b["Open"]) < abs(a["Close"] - a["Open"]) * 0.5 and
+        b["Close"] > a["Close"] and
+        c["Close"] < c["Open"] and
+        c["Close"] < (a["Open"] + a["Close"]) / 2
+    )
+    confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < c["Low"]
+    return pattern_ok and confirm_ok
+
+def piercing_line(hist):
+    if len(hist) < 3:
+        return False
+    prev, pattern, confirm = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    pattern_ok = (
+        prev["Close"] < prev["Open"] and
+        pattern["Open"] < prev["Close"] and
+        pattern["Close"] > (prev["Open"] + prev["Close"]) / 2 and
+        pattern["Close"] < prev["Open"]
+    )
+    confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
+    return pattern_ok and confirm_ok
+
+def dark_cloud_cover(hist):
+    if len(hist) < 3:
+        return False
+    prev, pattern, confirm = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    pattern_ok = (
+        prev["Close"] > prev["Open"] and
+        pattern["Open"] > prev["Close"] and
+        pattern["Close"] < (prev["Open"] + prev["Close"]) / 2 and
+        pattern["Close"] > prev["Open"]
+    )
+    confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < pattern["Low"]
+    return pattern_ok and confirm_ok
+
+def spinning_top(hist):
+    if len(hist) < 1:
+        return False
+    last = hist.iloc[-1]
+    total_range = last["High"] - last["Low"]
+    if total_range == 0:
+        return False
+    body = abs(last["Close"] - last["Open"])
+    upper_shadow = last["High"] - max(last["Open"], last["Close"])
+    lower_shadow = min(last["Open"], last["Close"]) - last["Low"]
+    return (
+        body <= 0.4 * total_range and
+        upper_shadow >= 0.5 * body and
+        lower_shadow >= 0.5 * body
+    )
+
+def rising_three_methods(hist):
+    if len(hist) < 5:
+        return False
+    a, b, c, d, e = hist.iloc[-5], hist.iloc[-4], hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] > a["Open"] and (a["Close"] - a["Open"]) > (a["High"] - a["Low"]) * 0.6
+    cond2 = all([
+        (
+            candle["High"] <= a["High"] and
+            candle["Low"] >= a["Low"] and
+            abs(candle["Close"] - candle["Open"]) < (a["Close"] - a["Open"]) * 0.5
+        )
+        for candle in [b, c, d]
+    ])
+    cond3 = e["Close"] > e["Open"] and e["Close"] > a["Close"]
+    return cond1 and cond2 and cond3
+
+def abandoned_baby(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    rng_b = b["High"] - b["Low"]
+    if rng_b == 0:
+        return False
+    is_doji = abs(b["Close"] - b["Open"]) <= 0.1 * rng_b
+    bullish = (
+        a["Close"] < a["Open"] and
+        is_doji and b["High"] < a["Low"] and
+        c["Close"] > c["Open"] and c["Open"] > b["High"]
+    )
+    bearish = (
+        a["Close"] > a["Open"] and
+        is_doji and b["Low"] > a["High"] and
+        c["Close"] < c["Open"] and c["Open"] < b["Low"]
+    )
+    return bullish or bearish
+
+def three_inside_up(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] < a["Open"]
+    cond2 = (
+        b["Close"] > b["Open"] and
+        b["Open"] >= a["Close"] and
+        b["Close"] <= a["Open"]
+    )
+    cond3 = c["Close"] > c["Open"] and c["Close"] > a["Open"]
+    return cond1 and cond2 and cond3
+
+def three_inside_down(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] > a["Open"]
+    cond2 = (
+        b["Close"] < b["Open"] and
+        b["Open"] <= a["Close"] and
+        b["Close"] >= a["Open"]
+    )
+    cond3 = c["Close"] < c["Open"] and c["Close"] < a["Open"]
+    return cond1 and cond2 and cond3
+
+def bullish_tasuki_gap(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] > a["Open"]
+    cond2 = (
+        b["Close"] < b["Open"] and
+        b["Open"] >= a["Open"] and b["Open"] <= a["Close"] and
+        b["Close"] > a["Open"]
+    )
+    cond3 = c["Close"] > c["Open"] and c["Close"] > a["Close"]
+    return cond1 and cond2 and cond3
+
+def bearish_tasuki_gap(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] < a["Open"]
+    cond2 = (
+        b["Close"] > b["Open"] and
+        b["Open"] <= a["Open"] and b["Open"] >= a["Close"] and
+        b["Close"] < a["Open"]
+    )
+    cond3 = c["Close"] < c["Open"] and c["Close"] < a["Close"]
+    return cond1 and cond2 and cond3
+
+def mat_hold(hist):
+    if len(hist) < 5:
+        return False
+    a, b, c, d, e = hist.iloc[-5], hist.iloc[-4], hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] > a["Open"] and (a["Close"] - a["Open"]) > (a["High"] - a["Low"]) * 0.6
+    cond2 = all([
+        (
+            abs(candle["Close"] - candle["Open"]) < (a["Close"] - a["Open"]) * 0.5 and
+            candle["Low"] > a["Open"]
+        )
+        for candle in [b, c, d]
+    ])
+    cond3 = e["Close"] > e["Open"] and e["Close"] > a["Close"]
+    return cond1 and cond2 and cond3
+
+def kicking(hist):
+    if len(hist) < 2:
+        return False
+    a, b = hist.iloc[-2], hist.iloc[-1]
+
+    def is_marubozu(candle):
+        body = abs(candle["Close"] - candle["Open"])
+        upper_shadow = candle["High"] - max(candle["Open"], candle["Close"])
+        lower_shadow = min(candle["Open"], candle["Close"]) - candle["Low"]
+        return body > 0 and upper_shadow <= 0.05 * body and lower_shadow <= 0.05 * body
+
+    cond1 = is_marubozu(a)
+    cond2 = is_marubozu(b) and (
+        (a["Close"] > a["Open"] and b["Close"] < b["Open"]) or
+        (a["Close"] < a["Open"] and b["Close"] > b["Open"])
+    )
+    gap_up = (a["Close"] < a["Open"] and b["Open"] > a["High"])
+    gap_down = (a["Close"] > a["Open"] and b["Open"] < a["Low"])
+    return cond1 and cond2 and (gap_up or gap_down)
+
+def three_white_soldiers(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+
+    def is_strong_bullish(candle):
+        rng = candle["High"] - candle["Low"]
+        if rng == 0:
+            return False
+        return candle["Close"] > candle["Open"] and (candle["Close"] - candle["Open"]) > 0.6 * rng
+
+    cond1 = is_strong_bullish(a)
+    cond2 = is_strong_bullish(b) and b["Open"] >= a["Open"] and b["Open"] <= a["Close"] and b["Close"] > a["Close"]
+    cond3 = is_strong_bullish(c) and c["Open"] >= b["Open"] and c["Open"] <= b["Close"] and c["Close"] > b["Close"]
+    return cond1 and cond2 and cond3
+
+def three_black_crows(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+
+    def is_strong_bearish(candle):
+        rng = candle["High"] - candle["Low"]
+        if rng == 0:
+            return False
+        return candle["Close"] < candle["Open"] and (candle["Open"] - candle["Close"]) > 0.6 * rng
+
+    cond1 = is_strong_bearish(a)
+    cond2 = is_strong_bearish(b) and b["Open"] <= a["Open"] and b["Open"] >= a["Close"] and b["Close"] < a["Close"]
+    cond3 = is_strong_bearish(c) and c["Open"] <= b["Open"] and c["Open"] >= b["Close"] and c["Close"] < b["Close"]
+    return cond1 and cond2 and cond3
+
+def rising_window(hist):
+    if len(hist) < 2:
+        return False
+    a, b = hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] > a["Open"]
+    cond2 = b["Close"] > b["Open"]
+    cond3 = b["Low"] > a["High"]
+    return cond1 and cond2 and cond3
+
+def falling_window(hist):
+    if len(hist) < 2:
+        return False
+    a, b = hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] < a["Open"]
+    cond2 = b["Close"] < b["Open"]
+    cond3 = b["High"] < a["Low"]
+    return cond1 and cond2 and cond3
+
+def bullish_separating_lines(hist):
+    if len(hist) < 2:
+        return False
+    a, b = hist.iloc[-2], hist.iloc[-1]
+    rng = a["High"] - a["Low"]
+    if rng == 0:
+        return False
+    cond1 = a["Close"] > a["Open"]
+    cond2 = b["Close"] > b["Open"]
+    cond3 = abs(b["Open"] - a["Open"]) <= 0.05 * rng
+    cond4 = b["Close"] > a["Close"]
+    return cond1 and cond2 and cond3 and cond4
+
+def bearish_separating_lines(hist):
+    if len(hist) < 2:
+        return False
+    a, b = hist.iloc[-2], hist.iloc[-1]
+    rng = a["High"] - a["Low"]
+    if rng == 0:
+        return False
+    cond1 = a["Close"] < a["Open"]
+    cond2 = b["Close"] < b["Open"]
+    cond3 = abs(b["Open"] - a["Open"]) <= 0.05 * rng
+    cond4 = b["Close"] < a["Close"]
+    return cond1 and cond2 and cond3 and cond4
+
+def upside_gap_two_crows(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] > a["Open"]
+    cond2 = (b["Close"] < b["Open"] and b["Open"] > a["Close"] and b["Close"] > a["Close"])
+    cond3 = (c["Close"] < c["Open"] and c["Open"] > b["Open"] and c["Close"] < b["Close"] and c["Close"] > a["Close"])
+    return cond1 and cond2 and cond3
+
+def on_neck(hist):
+    if len(hist) < 2:
+        return False
+    a, b = hist.iloc[-2], hist.iloc[-1]
+    rng = a["High"] - a["Low"]
+    if rng == 0:
+        return False
+    cond1 = a["Close"] < a["Open"]
+    cond2 = b["Close"] > b["Open"]
+    cond3 = b["Open"] < a["Close"] and abs(b["Close"] - a["Close"]) <= 0.1 * rng
+    return cond1 and cond2 and cond3
+
+def in_neck(hist):
+    if len(hist) < 2:
+        return False
+    a, b = hist.iloc[-2], hist.iloc[-1]
+    cond1 = a["Close"] < a["Open"]
+    cond2 = b["Close"] > b["Open"]
+    cond3 = b["Open"] < a["Close"] and b["Close"] > a["Close"] and b["Close"] < a["Open"]
+    return cond1 and cond2 and cond3
+
+def thrusting(hist):
+    if len(hist) < 2:
+        return False
+    a, b = hist.iloc[-2], hist.iloc[-1]
+    midpoint = (a["Open"] + a["Close"]) / 2
+    cond1 = a["Close"] < a["Open"]
+    cond2 = b["Close"] > b["Open"]
+    cond3 = b["Open"] < a["Close"] and b["Close"] > midpoint and b["Close"] < a["Open"]
+    return cond1 and cond2 and cond3
+
+def deliberation(hist):
+    if len(hist) < 3:
+        return False
+    a, b, c = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
+    rng_a = a["High"] - a["Low"]
+    if rng_a == 0:
+        return False
+    cond1 = a["Close"] > a["Open"] and (a["Close"] - a["Open"]) > 0.6 * rng_a
+    cond2 = b["Close"] > b["Open"] and (b["Close"] - b["Open"]) < (a["Close"] - a["Open"])
+    body_c = abs(c["Close"] - c["Open"])
+    cond3 = (
+        body_c < 0.5 * (b["Close"] - b["Open"]) and
+        abs(c["Close"] - b["Close"]) <= 0.1 * (b["High"] - b["Low"])
+    )
+    return cond1 and cond2 and cond3
+
+# ======================================
+# Technical indicators
+# ======================================
+def rsi(hist, period=14):
+    if len(hist) < period + 1:
+        return None
+    delta = hist["Close"].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1 / period, min_periods=period).mean()
+    rs = avg_gain / avg_loss
+    rsi_series = 100 - (100 / (1 + rs))
+    return float(rsi_series.iloc[-1])
+
+def macd(hist, fast=12, slow=26, signal=9):
+    if len(hist) < slow + signal:
+        return None
+    fast_ma = hist["Close"].ewm(span=fast).mean()
+    slow_ma = hist["Close"].ewm(span=slow).mean()
+    macd_line = fast_ma - slow_ma
+    signal_line = macd_line.ewm(span=signal).mean()
+    return float(macd_line.iloc[-1]), float(signal_line.iloc[-1])
+
+def golden_cross(hist):
+    if len(hist) < 200:
+        return False
+    ma50 = hist["Close"].rolling(50).mean()
+    ma200 = hist["Close"].rolling(200).mean()
+    return ma50.iloc[-2] <= ma200.iloc[-2] and ma50.iloc[-1] > ma200.iloc[-1]
+
+def death_cross(hist):
+    if len(hist) < 200:
+        return False
+    ma50 = hist["Close"].rolling(50).mean()
+    ma200 = hist["Close"].rolling(200).mean()
+    return ma50.iloc[-2] >= ma200.iloc[-2] and ma50.iloc[-1] < ma200.iloc[-1]
+
+def bollinger_breakout(hist, period=20, num_std=2):
+    if len(hist) < period + 1:
+        return False
+    ma = hist["Close"].rolling(period).mean()
+    std = hist["Close"].rolling(period).std()
+    upper = ma + num_std * std
+    return hist["Close"].iloc[-2] <= upper.iloc[-2] and hist["Close"].iloc[-1] > upper.iloc[-1]
+
+def bollinger_breakdown(hist, period=20, num_std=2):
+    if len(hist) < period + 1:
+        return False
+    ma = hist["Close"].rolling(period).mean()
+    std = hist["Close"].rolling(period).std()
+    lower = ma - num_std * std
+    return hist["Close"].iloc[-2] >= lower.iloc[-2] and hist["Close"].iloc[-1] < lower.iloc[-1]
+
+def volume_spike(hist, lookback=20):
+    if len(hist) < lookback:
+        return False
+    avg_vol = hist["Volume"].rolling(lookback).mean().iloc[-1]
+    return hist["Volume"].iloc[-1] > 1.5 * avg_vol
+
+# ======================================
+# Financial indicators
+# ======================================
+def marketcap_gt_1b(info):
+    return info.get("marketCap", 0) > 1_000_000_000
+
+def marketcap_lt_1b(info):
+    return info.get("marketCap", 0) < 1_000_000_000
+
+def pe_lt_20(info):
+    return info.get("trailingPE", 999) < 20
+
+def pe_gt_40(info):
+    return info.get("trailingPE", 0) > 40
+
+def eps_positive_growth(info):
+    return info.get("earningsGrowth", 0) > 0
+
+def eps_negative_growth(info):
+    return info.get("earningsGrowth", 0) < 0
+
+def dividend_yield_gt_2(info):
+    return info.get("dividendYield", 0) and info["dividendYield"] > 0.02
+
+def debt_equity_lt_1(info):
+    return info.get("debtToEquity", 999) < 1
+
+# ======================================
+# Indicator mapping
+# ======================================
+INDICATOR_CHECKS = {
+    # Chart patterns
+    "Bullish_Marubozu": lambda hist, info: bullish_marubozu(hist),
+    "Bearish_Marubozu": lambda hist, info: bearish_marubozu(hist),
+    "Doji": lambda hist, info: doji(hist),
+    "Hammer": lambda hist, info: hammer(hist),
+    "Inverted_Hammer": lambda hist, info: inverted_hammer(hist),
+    "Bullish_Engulfing": lambda hist, info: bullish_engulfing(hist),
+    "Bearish_Engulfing": lambda hist, info: bearish_engulfing(hist),
+    "Morning_Star": lambda hist, info: morning_star(hist),
+    "Evening_Star": lambda hist, info: evening_star(hist),
+    "Piercing_Line": lambda hist, info: piercing_line(hist),
+    "Dark_Cloud_Cover": lambda hist, info: dark_cloud_cover(hist),
+    "Spinning_Top": lambda hist, info: spinning_top(hist),
+    "Rising_Three_Methods": lambda hist, info: rising_three_methods(hist),
+    "Abandoned_Baby": lambda hist, info: abandoned_baby(hist),
+    "Three_Inside_Up": lambda hist, info: three_inside_up(hist),
+    "Three_Inside_Down": lambda hist, info: three_inside_down(hist),
+    "Bullish_Tasuki_Gap": lambda hist, info: bullish_tasuki_gap(hist),
+    "Bearish_Tasuki_Gap": lambda hist, info: bearish_tasuki_gap(hist),
+    "Mat_Hold": lambda hist, info: mat_hold(hist),
+    "Kicking": lambda hist, info: kicking(hist),
+    "Three_White_Soldiers": lambda hist, info: three_white_soldiers(hist),
+    "Three_Black_Crows": lambda hist, info: three_black_crows(hist),
+    "Rising_Window": lambda hist, info: rising_window(hist),
+    "Falling_Window": lambda hist, info: falling_window(hist),
+    "Bullish_Separating_Lines": lambda hist, info: bullish_separating_lines(hist),
+    "Bearish_Separating_Lines": lambda hist, info: bearish_separating_lines(hist),
+    "Upside_Gap_Two_Crows": lambda hist, info: upside_gap_two_crows(hist),
+    "On_Neck": lambda hist, info: on_neck(hist),
+    "In_Neck": lambda hist, info: in_neck(hist),
+    "Thrusting": lambda hist, info: thrusting(hist),
+    "Deliberation": lambda hist, info: deliberation(hist),
+
+    # Technical
+    "RSI_Overbought": lambda hist, info: (rsi(hist) is not None) and rsi(hist) > 70,
+    "RSI_Oversold": lambda hist, info: (rsi(hist) is not None) and rsi(hist) < 30,
+    "MACD_Bullish": lambda hist, info: (macd(hist) is not None) and macd(hist)[0] > macd(hist)[1],
+    "MACD_Bearish": lambda hist, info: (macd(hist) is not None) and macd(hist)[0] < macd(hist)[1],
+    "Golden_Cross": lambda hist, info: golden_cross(hist),
+    "Death_Cross": lambda hist, info: death_cross(hist),
+    "Bollinger_Breakout": lambda hist, info: bollinger_breakout(hist),
+    "Bollinger_Breakdown": lambda hist, info: bollinger_breakdown(hist),
+    "Volume_Spike": lambda hist, info: volume_spike(hist),
+
+    # Financial
+    "MarketCap_Gt_1B": lambda hist, info: marketcap_gt_1b(info),
+    "MarketCap_Lt_1B": lambda hist, info: marketcap_lt_1b(info),
+    "PE_Lt_20": lambda hist, info: pe_lt_20(info),
+    "PE_Gt_40": lambda hist, info: pe_gt_40(info),
+    "EPS_Positive_Growth": lambda hist, info: eps_positive_growth(info),
+    "EPS_Negative_Growth": lambda hist, info: eps_negative_growth(info),
+    "DividendYield_Gt_2": lambda hist, info: dividend_yield_gt_2(info),
+    "DebtEquity_Lt_1": lambda hist, info: debt_equity_lt_1(info),
+}
+
+# ======================================
+# Data fetch and ticker parsing
+# ======================================
+@st.cache_data
+def fetch_stock_data(ticker):
+    """Fetch data once per ticker and compute all indicators."""
     try:
-        r = requests.get(url, headers=headers, timeout=timeout)
-        r.raise_for_status()
-        text = r.text
-        df = pd.read_csv(StringIO(text), dtype=str, keep_default_na=False)
-        # If csv is empty or no rows, return empty list
-        if df.empty:
-            return [], None
-        # Try convert to trade list
-        trades = df_to_trade_list(df)
-        return trades, None
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        hist = stock.history(period="1y")
+
+        if not info or hist.empty:
+            return None
+
+        result = {
+            "Ticker": ticker,
+            "Company": info.get("longName", "N/A"),
+            "Price": info.get("currentPrice", np.nan),
+            "Market Cap (B)": info.get("marketCap", np.nan) / 1e9 if info.get("marketCap") else np.nan,
+            "P/E Ratio": info.get("trailingPE", np.nan),
+            "Dividend Yield (%)": info.get("dividendYield", np.nan) * 100 if info.get("dividendYield") else np.nan,
+            "Beta": info.get("beta", np.nan),
+            "Sector": info.get("sector", "N/A"),
+            "Price_Trend": prior_trend(hist["Close"]),
+            "Volume_Trend": prior_volume_trend(hist["Volume"]),
+            "RSI": rsi(hist),
+        }
+
+        for name, fn in INDICATOR_CHECKS.items():
+            result[name] = fn(hist, info)
+
+        return result
     except Exception as e:
-        return [], f"Failed to fetch/load CSV from Google Sheets URL: {e}"
-
-# -----------------------
-# Trading logic (simple)
-# -----------------------
-def add_trade(ticker: str, side: str, qty: float, price: float) -> Dict:
-    trades = st.session_state.trades
-    next_id = max([t.get("id",0) for t in trades], default=0) + 1
-    trade = {
-        "id": next_id,
-        "ticker": sanitize_ticker(ticker),
-        "side": side.lower(),
-        "qty": float(qty),
-        "price": float(price),
-        "commission": float(st.session_state.settings.get("commission", 0.0)),
-        "timestamp": now_iso()
-    }
-    st.session_state.trades.append(trade)
-    return trade
-
-def compute_positions_and_pnl(trades: List[Dict]):
-    positions = {}
-    total_realized = 0.0
-    buy_lots = {}
-    for t in trades:
-        tic = sanitize_ticker(t["ticker"])
-        side = t["side"]
-        qty = float(t["qty"])
-        price = float(t["price"])
-        com = float(t.get("commission", 0.0))
-        if tic not in buy_lots:
-            buy_lots[tic] = []
-        if side == "buy":
-            buy_lots[tic].append([qty, price])
-        elif side == "sell":
-            remaining = qty
-            while remaining > 0 and buy_lots[tic]:
-                lot_qty, lot_price = buy_lots[tic][0]
-                if lot_qty > remaining:
-                    realized = remaining * (price - lot_price) - com
-                    total_realized += realized
-                    buy_lots[tic][0][0] = lot_qty - remaining
-                    remaining = 0
-                else:
-                    realized = lot_qty * (price - lot_price) - com
-                    total_realized += realized
-                    remaining -= lot_qty
-                    buy_lots[tic].pop(0)
-            if remaining > 0:
-                total_realized += remaining * price - com
-                remaining = 0
-    for tic, lots in buy_lots.items():
-        qty = sum(l[0] for l in lots)
-        avg_cost = sum(l[0]*l[1] for l in lots)/qty if qty>0 else 0.0
-        positions[tic] = {"qty": qty, "avg_cost": avg_cost, "lots": [(l[0], l[1]) for l in lots]}
-    return positions, total_realized
-
-def get_market_price(ticker: str) -> Optional[float]:
-    ticker = sanitize_ticker(ticker)
-    cached = st.session_state.last_prices.get(ticker)
-    if cached is not None:
-        return cached
-    try:
-        t = yf.Ticker(ticker)
-        info = {}
-        try:
-            info = t.info or {}
-        except Exception:
-            info = {}
-        price = info.get("regularMarketPrice") or info.get("currentPrice")
-        if price is None:
-            hist = t.history(period="1d", interval="1m")
-            if not hist.empty:
-                price = float(hist["Close"].iloc[-1])
-        st.session_state.last_prices[ticker] = price
-        return price
-    except Exception:
+        st.warning(f"Error fetching {ticker}: {e}")
         return None
 
-# -----------------------
-# App startup
-# -----------------------
-ensure_state()
+def parse_ticker_file(uploaded_file):
+    try:
+        content = uploaded_file.read().decode("utf-8")
+        tickers = []
+        for line in content.strip().split("\n"):
+            line_tickers = [t.strip().upper() for t in line.split(",") if t.strip()]
+            tickers.extend(line_tickers)
+        return sorted(set(tickers))
+    except Exception as e:
+        st.error(f"Error parsing file: {e}")
+        return []
 
-# Load from Google Sheet at startup (if session has no trades or user forces reload)
-load_msg = ""
-if not st.session_state.trades:
-    st.info("Attempting to load trades from the public Google Sheet...")
-    trades, err = fetch_trades_from_public_sheet(SHEET_CSV_URL)
-    if err:
-        st.warning(err)
+def plot_candlestick(symbol, period="6mo", around_date=None):
+    ticker = yf.Ticker(symbol)
+
+    if around_date is not None:
+        if isinstance(around_date, str):
+            around_date = pd.to_datetime(around_date)
+        start_date = around_date - pd.Timedelta(days=15)
+        end_date = around_date + pd.Timedelta(days=15)
+        hist = ticker.history(start=start_date, end=end_date)
+        title = f"{symbol} chart around {around_date.date()}"
     else:
-        if trades:
-            st.session_state.trades = trades
-            st.success(f"Loaded {len(trades)} trades from the Google Sheet.")
-        else:
-            st.info("No trades found in the Google Sheet (or sheet empty). Starting with empty trading session.")
+        hist = ticker.history(period=period)
+        title = f"{symbol} {period} chart"
 
-# -----------------------
-# UI
-# -----------------------
-st.title("Paper Trading Simulator — Load from Google Sheet / Manual Save")
+    if hist is None or hist.empty:
+        st.warning(f"No chart data available for {symbol}")
+        return
 
-left, right = st.columns([2,3])
+    hist = hist.reset_index()
 
-with left:
-    st.subheader("Google Sheet (load) & Export (manual save)")
+    fig = go.Figure(
+        data=[
+            go.Candlestick(
+                x=hist["Date"],
+                open=hist["Open"],
+                high=hist["High"],
+                low=hist["Low"],
+                close=hist["Close"],
+                name=symbol,
+            )
+        ]
+    )
+    fig.update_layout(
+        title=title,
+        xaxis_title="Date",
+        yaxis_title="Price",
+        xaxis_rangeslider_visible=False,
+        template="plotly_white",
+        height=500,
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown(f"- Google Sheet (read-only load): [{SHEET_CSV_URL}]({SHEET_CSV_URL})")
-    st.markdown("  *This app reads the sheet's CSV export; you must keep the sheet public for automatic loading.*")
 
-    if st.button("Reload from Google Sheet now"):
-        trades, err = fetch_trades_from_public_sheet(SHEET_CSV_URL)
-        if err:
-            st.error(err)
-        else:
-            st.session_state.trades = trades
-            st.success(f"Reloaded {len(trades)} trades from the Google Sheet.")
-            # clear price cache to refresh quotes
-            st.session_state.last_prices = {}
+# ======================================
+# Streamlit app
+# ======================================
+st.set_page_config(page_title="Nifty50 Advanced Stock Screener", layout="wide")
+st.title("📈 Nifty50 Advanced Stock Screener")
+if "selected_ticker" not in st.session_state:
+    st.session_state["selected_ticker"] = None
 
-    st.markdown("---")
-    st.subheader("Save changes (manual upload workflow)")
-    st.write("When you press 'Prepare export' the app will generate an updated CSV with current trades.")
-    st.write("After downloading the CSV, open your Google Sheet, choose File → Import → Upload and select the downloaded file.")
-    st.write("When importing select the option to 'Replace current sheet' (or 'Replace spreadsheet') to overwrite with the updated CSV.")
-    if st.button("Prepare export (generate CSV)"):
-        df_out = trade_list_to_df(st.session_state.trades)
-        csv_bytes = df_out.to_csv(index=False).encode("utf-8")
-        st.session_state["_last_export"] = csv_bytes
-        st.success("CSV prepared. Click the Download button below to save the file to your machine.")
-        # show export timestamp
-        st.write("Export prepared at:", now_iso())
 
-    if "_last_export" in st.session_state:
-        st.download_button("⬇️ Download updated trades CSV", data=st.session_state["_last_export"],
-                           file_name=f"trades_export_{int(time.time())}.csv", mime="text/csv")
-        st.info("After downloading, go to your Google Sheet and import this CSV to replace the sheet contents. The app will not upload automatically.")
+# Sidebar: ticker universe + screening filters
+with st.sidebar:
+    st.header("📋 Ticker Universe")
 
-    st.markdown("---")
-    st.subheader("Upload CSV to replace in-memory trades (optional)")
-    uploaded = st.file_uploader("Upload CSV to replace session trades (this does NOT modify the Google Sheet)", type=["csv"])
-    if uploaded is not None:
-        if st.button("Replace in-memory trades with uploaded file"):
-            try:
-                df = pd.read_csv(uploaded)
-                trades = df_to_trade_list(df)
-                st.session_state.trades = trades
-                st.session_state.last_prices = {}
-                st.success(f"Replaced session trades with {len(trades)} items from uploaded CSV.")
-            except Exception as e:
-                st.error(f"Failed to parse uploaded CSV: {e}")
+    ticker_source = st.radio(
+        "Select ticker source:",
+        ["Nifty50 (default)", "Upload custom CSV/TXT"],
+        index=0
+    )
 
-    st.markdown("---")
-    st.subheader("Account Controls")
-    st.write(f"Cash: ${st.session_state.cash:,.2f}")
-    with st.form("trade_form"):
-        t_ticker = st.text_input("Ticker", value="AAPL")
-        t_side = st.selectbox("Side", ("Buy","Sell"))
-        t_qty = st.number_input("Quantity", min_value=1.0, value=1.0, step=1.0)
-        t_price_override = st.number_input("Explicit price (0 = market)", value=0.0, format="%.4f")
-        submit = st.form_submit_button("Place order")
-    if submit:
-        ticker = sanitize_ticker(t_ticker)
-        market_price = get_market_price(ticker)
-        exec_price = float(t_price_override) if float(t_price_override) > 0 else (market_price if market_price is not None else None)
-        if exec_price is None:
-            st.error("Unable to determine market price; enter explicit price.")
-        else:
-            cost = exec_price * float(t_qty) + float(st.session_state.settings.get("commission",0.0))
-            positions, _ = compute_positions_and_pnl(st.session_state.trades)
-            pos_qty = positions.get(ticker, {}).get("qty", 0.0)
-            if t_side.lower() == "buy":
-                if cost > st.session_state.cash:
-                    st.error("Insufficient cash.")
-                else:
-                    tr = add_trade(ticker, "buy", t_qty, exec_price)
-                    st.session_state.cash -= cost
-                    st.success(f"Bought {t_qty} {ticker} @ {exec_price:.4f}")
-            else:
-                if t_qty > pos_qty:
-                    st.error(f"Insufficient position to sell (you have {pos_qty}).")
-                else:
-                    tr = add_trade(ticker, "sell", t_qty, exec_price)
-                    proceeds = exec_price * float(t_qty) - float(tr.get("commission",0.0))
-                    st.session_state.cash += proceeds
-                    st.success(f"Sold {t_qty} {ticker} @ {exec_price:.4f}")
-
-    st.markdown("---")
-    st.subheader("Settings")
-    comm = st.number_input("Commission per trade (flat)", value=float(st.session_state.settings.get("commission",0.0)), step=0.01, format="%.2f")
-    if st.button("Update commission"):
-        st.session_state.settings["commission"] = float(comm)
-        st.success("Commission updated.")
-
-with right:
-    st.subheader("Portfolio & Trade History")
-    positions, total_realized = compute_positions_and_pnl(st.session_state.trades)
-    rows = []
-    total_market_value = 0.0
-    for tic, v in positions.items():
-        qty = v["qty"]
-        avg_cost = v["avg_cost"]
-        market_price = get_market_price(tic) or np.nan
-        unreal = (market_price - avg_cost) * qty if (not np.isnan(market_price) and qty>0) else np.nan
-        mv = (market_price * qty) if not np.isnan(market_price) else np.nan
-        total_market_value += mv if not np.isnan(mv) else 0.0
-        rows.append({"Ticker": tic, "Quantity": qty, "Avg Cost": avg_cost, "Market Price": market_price, "Market Value": mv, "Unrealized P/L": unreal})
-    df_pos = pd.DataFrame(rows)
-    st.metric("Total Realized P/L", f"${total_realized:,.2f}")
-    st.metric("Portfolio Market Value", f"${total_market_value:,.2f}")
-    st.metric("Total Equity", f"${st.session_state.cash + total_market_value:,.2f}")
-
-    st.markdown("### Positions")
-    if df_pos.empty:
-        st.info("No positions.")
+    if ticker_source == "Nifty50 (default)":
+        current_tickers = NIFTY50_TICKERS
+        st.info(f"Using {len(current_tickers)} Nifty50 tickers as default universe.")
+        uploaded_file = None
     else:
-        df_display = df_pos.copy()
-        df_display["Avg Cost"] = df_display["Avg Cost"].map(lambda x: f"${x:,.2f}")
-        df_display["Market Price"] = df_display["Market Price"].map(lambda x: f"${x:,.2f}" if not pd.isna(x) else "N/A")
-        df_display["Market Value"] = df_display["Market Value"].map(lambda x: f"${x:,.2f}" if not pd.isna(x) else "N/A")
-        df_display["Unrealized P/L"] = df_display["Unrealized P/L"].map(lambda x: f"${x:,.2f}" if not pd.isna(x) else "N/A")
-        st.dataframe(df_display.set_index("Ticker"))
-
-    st.markdown("---")
-    st.subheader("Trade History")
-    if not st.session_state.trades:
-        st.info("No trades yet.")
-    else:
-        df_tr = trade_list_to_df(st.session_state.trades)
-        df_disp = df_tr.copy()
-        df_disp["price"] = df_disp["price"].map(lambda x: f"${x:,.4f}")
-        df_disp = df_disp[["id","timestamp","ticker","side","qty","price","commission"]]
-        df_disp.columns = ["ID","Timestamp","Ticker","Side","Qty","Price","Commission"]
-        st.dataframe(df_disp.sort_values("ID",ascending=False))
-        csv_bytes = trade_list_to_df(st.session_state.trades).to_csv(index=False).encode("utf-8")
-        st.download_button("Download trade history CSV", data=csv_bytes, file_name="trades_export.csv", mime="text/csv")
-
-    st.markdown("---")
-    st.subheader("Chart")
-    chart_sym = st.text_input("Ticker for chart", value="AAPL", key="chart_ticker")
-    chart_period = st.selectbox("Chart period", ["1mo","3mo","6mo","1y","5y"], index=2, key="chart_period")
-    if st.button("Load chart"):
-        ts = sanitize_ticker(chart_sym)
-        try:
-            hist = yf.Ticker(ts).history(period=chart_period, auto_adjust=True)
-        except Exception:
-            hist = pd.DataFrame()
-        if hist is None or hist.empty:
-            st.error("No historical data.")
+        uploaded_file = st.file_uploader(
+            "Upload tickers file (comma-separated)",
+            type=["csv", "txt"]
+        )
+        if uploaded_file is not None:
+            current_tickers = parse_ticker_file(uploaded_file)
+            st.success(f"Loaded {len(current_tickers)} unique tickers from file.")
         else:
-            hist = hist.reset_index()
-            fig = go.Figure()
-            if {"Open","High","Low","Close"}.issubset(hist.columns):
-                fig = go.Figure(data=[go.Candlestick(x=hist["Date"], open=hist["Open"], high=hist["High"], low=hist["Low"], close=hist["Close"])])
-            else:
-                fig.add_trace(go.Scatter(x=hist["Date"], y=hist["Close"], mode="lines"))
-            fig.update_layout(title=f"{ts} {chart_period}", height=600)
-            st.plotly_chart(fig, width='stretch')
-            mp = get_market_price(ts)
-            if mp is not None:
-                st.metric(f"Latest price ({ts})", f"${mp:,.4f}")
+            current_tickers = []
+            st.warning("Upload a ticker file to proceed.")
 
-st.markdown("---")
-st.caption("This app auto-loads trades from the public Google Sheet at startup. Use 'Prepare export' + download to export updated CSV, then manually upload to Google Sheets (File → Import → Upload → Replace).")
+    st.header("🎯 Screening Filters")
+    selected_indicators = st.multiselect(
+        "Select indicators (ANY match):",
+        options=sorted(INDICATOR_CHECKS.keys()),
+        default=[]
+    )
+
+    run_screen = st.button("🚀 Fetch & Analyze Data", type="primary")
+
+# Main area: only screening results
+if run_screen and current_tickers:
+    st.write(f"Fetching 1-year data for {len(current_tickers)} tickers...")
+    prog = st.progress(0)
+
+    def _fetch_with_progress(tickers):
+        results = []
+        total = len(tickers)
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            for i, res in enumerate(executor.map(fetch_stock_data, tickers), 1):
+                if res is not None:
+                    results.append(res)
+                prog.progress(i / total)
+        return results
+
+    results = _fetch_with_progress(current_tickers)
+    df = pd.DataFrame(results)
+
+    if df.empty:
+        st.error("No valid data retrieved. Try different tickers.")
+    else:
+        st.success(f"Analyzed {len(df)} stocks. Screening ready.")
+        st.session_state["screening_df"] = df
+
+if "screening_df" in st.session_state:
+    df = st.session_state["screening_df"].copy()
+
+    st.subheader("📊 Screening Results")
+
+    if selected_indicators:
+        mask = df[selected_indicators].any(axis=1)
+        filtered_df = df[mask].copy()
+        st.caption(f"Filtered by {len(selected_indicators)} indicator(s); showing stocks that match ANY of them.")
+    else:
+        filtered_df = df.copy()
+        st.caption("No indicators selected; showing all analyzed stocks.")
+
+    if filtered_df.empty:
+        st.warning("No stocks match the current screening conditions.")
+    else:
+        st.write(f"Found **{len(filtered_df)}** matching stocks.")
+        st.dataframe(filtered_df, use_container_width=True, height=400)
+
+        # ---- Ticker selection for chart ----
+        tickers_in_result = filtered_df["Ticker"].tolist()
+        selected_symbol = st.selectbox(
+            "Click/choose a ticker to view its chart:",
+            options=["(none)"] + tickers_in_result,
+            index=0,
+        )
+
+        if selected_symbol != "(none)":
+            st.session_state["selected_ticker"] = selected_symbol
+
+        # Quick metrics
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Total analyzed", len(df))
+        with c2:
+            st.metric("Matches", len(filtered_df))
+        with c3:
+            mean_rsi = filtered_df["RSI"].mean()
+            st.metric("Average RSI", f"{mean_rsi:.1f}" if not np.isnan(mean_rsi) else "N/A")
+
+        csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "💾 Download results as CSV",
+            data=csv_data,
+            file_name="nifty50_screener_results.csv",
+            mime="text/csv"
+        )
+
+# ---- Chart rendering below the table ----
+if st.session_state.get("selected_ticker"):
+    st.markdown("---")
+    st.subheader(f"📉 Chart for {st.session_state['selected_ticker']}")
+    plot_candlestick(st.session_state["selected_ticker"])
+
