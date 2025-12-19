@@ -762,17 +762,17 @@ def page_screener():
         )
 
         if ticker_source == "Nifty50 (file)":
-            current_tickers = load_tickers_from_file("nifty50.txt")
+            current_tickers = load_tickers_from_file("Nifty50.txt")
             if current_tickers:
-                st.info(f"Using {len(current_tickers)} Nifty50 tickers from nifty50.txt.")
+                st.info(f"Using {len(current_tickers)} Nifty50 tickers from Nifty50.txt.")
             else:
                 st.warning("nifty50.txt is empty or could not be loaded.")
             uploaded_file = None
 
         elif ticker_source == "Nifty500 (file)":
-            current_tickers = load_tickers_from_file("nifty500.txt")
+            current_tickers = load_tickers_from_file("Nifty500.txt")
             if current_tickers:
-                st.info(f"Using {len(current_tickers)} Nifty500 tickers from nifty500.txt.")
+                st.info(f"Using {len(current_tickers)} Nifty500 tickers from Nifty500.txt.")
             else:
                 st.warning("nifty500.txt is empty or could not be loaded.")
             uploaded_file = None
