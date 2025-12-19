@@ -686,7 +686,7 @@ def plot_candlestick(symbol, period="6mo", around_date=None):
 # Streamlit app
 # ======================================
 st.set_page_config(page_title="Nifty50 Advanced Stock Screener", layout="wide")
-st.title("📈 Nifty50 Advanced Stock Screener")
+st.title("📈 Road to Runway")
 if "selected_ticker" not in st.session_state:
     st.session_state["selected_ticker"] = None
 
