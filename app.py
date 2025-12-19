@@ -4,8 +4,6 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-from plotly.subplots import make_subplots
 
 # ======================================
 # Default Nifty 50 tickers
@@ -640,9 +638,19 @@ def parse_ticker_file(uploaded_file):
         st.error(f"Error parsing file: {e}")
         return []
 
-def plot_candlestick(symbol, period="6mo"):
+def plot_candlestick(symbol, period="6mo", around_date=None):
     ticker = yf.Ticker(symbol)
-    hist = ticker.history(period=period)
+
+    if around_date is not None:
+        if isinstance(around_date, str):
+            around_date = pd.to_datetime(around_date)
+        start_date = around_date - pd.Timedelta(days=15)
+        end_date = around_date + pd.Timedelta(days=15)
+        hist = ticker.history(start=start_date, end=end_date)
+        title = f"{symbol} chart around {around_date.date()}"
+    else:
+        hist = ticker.history(period=period)
+        title = f"{symbol} {period} chart"
 
     if hist is None or hist.empty:
         st.warning(f"No chart data available for {symbol}")
@@ -650,55 +658,27 @@ def plot_candlestick(symbol, period="6mo"):
 
     hist = hist.reset_index()
 
-    # 2-row subplot: price (candles) + volume
-    fig = make_subplots(
-        rows=2,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.7, 0.3],
-        subplot_titles=(f"{symbol} {period} price", "Volume"),
+    fig = go.Figure(
+        data=[
+            go.Candlestick(
+                x=hist["Date"],
+                open=hist["Open"],
+                high=hist["High"],
+                low=hist["Low"],
+                close=hist["Close"],
+                name=symbol,
+            )
+        ]
     )
-
-    # Candlestick in row 1
-    fig.add_trace(
-        go.Candlestick(
-            x=hist["Date"],
-            open=hist["Open"],
-            high=hist["High"],
-            low=hist["Low"],
-            close=hist["Close"],
-            name="Price",
-        ),
-        row=1,
-        col=1,
-    )
-
-    # Volume bars in row 2
-    fig.add_trace(
-        go.Bar(
-            x=hist["Date"],
-            y=hist["Volume"],
-            name="Volume",
-            marker_color="lightgray",
-        ),
-        row=2,
-        col=1,
-    )
-
     fig.update_layout(
+        title=title,
+        xaxis_title="Date",
+        yaxis_title="Price",
         xaxis_rangeslider_visible=False,
         template="plotly_white",
-        showlegend=False,
-        height=600,
+        height=500,
     )
-
-    # Axis labels
-    fig.update_yaxes(title_text="Price", row=1, col=1)
-    fig.update_yaxes(title_text="Volume", row=2, col=1)
-
     st.plotly_chart(fig, use_container_width=True)
-
 
 
 # ======================================
@@ -777,10 +757,7 @@ if "screening_df" in st.session_state:
     if selected_indicators:
         mask = df[selected_indicators].any(axis=1)
         filtered_df = df[mask].copy()
-        st.caption(
-            f"Filtered by {len(selected_indicators)} indicator(s); "
-            f"showing stocks that match ANY of them."
-        )
+        st.caption(f"Filtered by {len(selected_indicators)} indicator(s); showing stocks that match ANY of them.")
     else:
         filtered_df = df.copy()
         st.caption("No indicators selected; showing all analyzed stocks.")
@@ -789,39 +766,20 @@ if "screening_df" in st.session_state:
         st.warning("No stocks match the current screening conditions.")
     else:
         st.write(f"Found **{len(filtered_df)}** matching stocks.")
+        st.dataframe(filtered_df, use_container_width=True, height=400)
 
-        # ---- AgGrid table with click handling ----
-        gb = GridOptionsBuilder.from_dataframe(filtered_df)
-        gb.configure_selection(
-            selection_mode="single",
-            use_checkbox=False
-        )
-        # Optional: enable single-click row selection
-        gb.configure_grid_options(rowSelection="single", rowMultiSelectWithClick=False)
-
-        grid_options = gb.build()
-
-        grid_response = AgGrid(
-            filtered_df,
-            gridOptions=grid_options,
-            update_mode=GridUpdateMode.SELECTION_CHANGED,
-            height=400,
-            fit_columns_on_grid_load=True,
-            enable_enterprise_modules=False,
+        # ---- Ticker selection for chart ----
+        tickers_in_result = filtered_df["Ticker"].tolist()
+        selected_symbol = st.selectbox(
+            "Click/choose a ticker to view its chart:",
+            options=["(none)"] + tickers_in_result,
+            index=0,
         )
 
-        selected_rows = grid_response.get("selected_rows", [])
+        if selected_symbol != "(none)":
+            st.session_state["selected_ticker"] = selected_symbol
 
-        # If a row is clicked/selected, show chart for its ticker
-        if selected_rows:
-            selected_row = selected_rows[0]
-            symbol = selected_row.get("Ticker")
-            if symbol:
-                st.markdown("---")
-                st.subheader(f"📉 Chart for {symbol}")
-                plot_candlestick(symbol)
-
-        # Metrics and download as before
+        # Quick metrics
         c1, c2, c3 = st.columns(3)
         with c1:
             st.metric("Total analyzed", len(df))
@@ -839,12 +797,9 @@ if "screening_df" in st.session_state:
             mime="text/csv"
         )
 
-
 # ---- Chart rendering below the table ----
 if st.session_state.get("selected_ticker"):
     st.markdown("---")
     st.subheader(f"📉 Chart for {st.session_state['selected_ticker']}")
     plot_candlestick(st.session_state["selected_ticker"])
-
-
 
