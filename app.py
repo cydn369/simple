@@ -1,10 +1,19 @@
 import os
+from datetime import datetime
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
+
+# ======================================
+# Config
+# ======================================
+
+PORTFOLIO_CSV_PATH = "portfolio_state.csv"
+
 
 # ======================================
 # Load Nifty tickers from local files
@@ -595,58 +604,58 @@ def debt_equity_lt_1(info):
 
 INDICATOR_CHECKS = {
     # Chart patterns
-    "Bullish_Marubozu":       lambda hist, info: bullish_marubozu(hist),
-    "Bearish_Marubozu":       lambda hist, info: bearish_marubozu(hist),
-    "Doji":                   lambda hist, info: doji(hist),
-    "Hammer":                 lambda hist, info: hammer(hist),
-    "Inverted_Hammer":        lambda hist, info: inverted_hammer(hist),
-    "Bullish_Engulfing":      lambda hist, info: bullish_engulfing(hist),
-    "Bearish_Engulfing":      lambda hist, info: bearish_engulfing(hist),
-    "Morning_Star":           lambda hist, info: morning_star(hist),
-    "Evening_Star":           lambda hist, info: evening_star(hist),
-    "Piercing_Line":          lambda hist, info: piercing_line(hist),
-    "Dark_Cloud_Cover":       lambda hist, info: dark_cloud_cover(hist),
-    "Spinning_Top":           lambda hist, info: spinning_top(hist),
-    "Rising_Three_Methods":   lambda hist, info: rising_three_methods(hist),
-    "Abandoned_Baby":         lambda hist, info: abandoned_baby(hist),
-    "Three_Inside_Up":        lambda hist, info: three_inside_up(hist),
-    "Three_Inside_Down":      lambda hist, info: three_inside_down(hist),
-    "Bullish_Tasuki_Gap":     lambda hist, info: bullish_tasuki_gap(hist),
-    "Bearish_Tasuki_Gap":     lambda hist, info: bearish_tasuki_gap(hist),
-    "Mat_Hold":               lambda hist, info: mat_hold(hist),
-    "Kicking":                lambda hist, info: kicking(hist),
-    "Three_White_Soldiers":   lambda hist, info: three_white_soldiers(hist),
-    "Three_Black_Crows":      lambda hist, info: three_black_crows(hist),
-    "Rising_Window":          lambda hist, info: rising_window(hist),
-    "Falling_Window":         lambda hist, info: falling_window(hist),
+    "Bullish_Marubozu": lambda hist, info: bullish_marubozu(hist),
+    "Bearish_Marubozu": lambda hist, info: bearish_marubozu(hist),
+    "Doji": lambda hist, info: doji(hist),
+    "Hammer": lambda hist, info: hammer(hist),
+    "Inverted_Hammer": lambda hist, info: inverted_hammer(hist),
+    "Bullish_Engulfing": lambda hist, info: bullish_engulfing(hist),
+    "Bearish_Engulfing": lambda hist, info: bearish_engulfing(hist),
+    "Morning_Star": lambda hist, info: morning_star(hist),
+    "Evening_Star": lambda hist, info: evening_star(hist),
+    "Piercing_Line": lambda hist, info: piercing_line(hist),
+    "Dark_Cloud_Cover": lambda hist, info: dark_cloud_cover(hist),
+    "Spinning_Top": lambda hist, info: spinning_top(hist),
+    "Rising_Three_Methods": lambda hist, info: rising_three_methods(hist),
+    "Abandoned_Baby": lambda hist, info: abandoned_baby(hist),
+    "Three_Inside_Up": lambda hist, info: three_inside_up(hist),
+    "Three_Inside_Down": lambda hist, info: three_inside_down(hist),
+    "Bullish_Tasuki_Gap": lambda hist, info: bullish_tasuki_gap(hist),
+    "Bearish_Tasuki_Gap": lambda hist, info: bearish_tasuki_gap(hist),
+    "Mat_Hold": lambda hist, info: mat_hold(hist),
+    "Kicking": lambda hist, info: kicking(hist),
+    "Three_White_Soldiers": lambda hist, info: three_white_soldiers(hist),
+    "Three_Black_Crows": lambda hist, info: three_black_crows(hist),
+    "Rising_Window": lambda hist, info: rising_window(hist),
+    "Falling_Window": lambda hist, info: falling_window(hist),
     "Bullish_Separating_Lines": lambda hist, info: bullish_separating_lines(hist),
     "Bearish_Separating_Lines": lambda hist, info: bearish_separating_lines(hist),
-    "Upside_Gap_Two_Crows":   lambda hist, info: upside_gap_two_crows(hist),
-    "On_Neck":                lambda hist, info: on_neck(hist),
-    "In_Neck":                lambda hist, info: in_neck(hist),
-    "Thrusting":              lambda hist, info: thrusting(hist),
-    "Deliberation":           lambda hist, info: deliberation(hist),
+    "Upside_Gap_Two_Crows": lambda hist, info: upside_gap_two_crows(hist),
+    "On_Neck": lambda hist, info: on_neck(hist),
+    "In_Neck": lambda hist, info: in_neck(hist),
+    "Thrusting": lambda hist, info: thrusting(hist),
+    "Deliberation": lambda hist, info: deliberation(hist),
 
     # Technical
-    "RSI_Overbought":         lambda hist, info: (rsi(hist) is not None) and rsi(hist) > 70,
-    "RSI_Oversold":           lambda hist, info: (rsi(hist) is not None) and rsi(hist) < 30,
-    "MACD_Bullish":           lambda hist, info: (macd(hist) is not None) and macd(hist)[0] > macd(hist)[1],
-    "MACD_Bearish":           lambda hist, info: (macd(hist) is not None) and macd(hist)[0] < macd(hist)[1],
-    "Golden_Cross":           lambda hist, info: golden_cross(hist),
-    "Death_Cross":            lambda hist, info: death_cross(hist),
-    "Bollinger_Breakout":     lambda hist, info: bollinger_breakout(hist),
-    "Bollinger_Breakdown":    lambda hist, info: bollinger_breakdown(hist),
-    "Volume_Spike":           lambda hist, info: volume_spike(hist),
+    "RSI_Overbought": lambda hist, info: (rsi(hist) is not None) and rsi(hist) > 70,
+    "RSI_Oversold": lambda hist, info: (rsi(hist) is not None) and rsi(hist) < 30,
+    "MACD_Bullish": lambda hist, info: (macd(hist) is not None) and macd(hist)[0] > macd(hist)[1],
+    "MACD_Bearish": lambda hist, info: (macd(hist) is not None) and macd(hist)[0] < macd(hist)[1],
+    "Golden_Cross": lambda hist, info: golden_cross(hist),
+    "Death_Cross": lambda hist, info: death_cross(hist),
+    "Bollinger_Breakout": lambda hist, info: bollinger_breakout(hist),
+    "Bollinger_Breakdown": lambda hist, info: bollinger_breakdown(hist),
+    "Volume_Spike": lambda hist, info: volume_spike(hist),
 
     # Financial
-    "MarketCap_Gt_1B":        lambda hist, info: marketcap_gt_1b(info),
-    "MarketCap_Lt_1B":        lambda hist, info: marketcap_lt_1b(info),
-    "PE_Lt_20":               lambda hist, info: pe_lt_20(info),
-    "PE_Gt_40":               lambda hist, info: pe_gt_40(info),
-    "EPS_Positive_Growth":    lambda hist, info: eps_positive_growth(info),
-    "EPS_Negative_Growth":    lambda hist, info: eps_negative_growth(info),
-    "DividendYield_Gt_2":     lambda hist, info: dividend_yield_gt_2(info),
-    "DebtEquity_Lt_1":        lambda hist, info: debt_equity_lt_1(info),
+    "MarketCap_Gt_1B": lambda hist, info: marketcap_gt_1b(info),
+    "MarketCap_Lt_1B": lambda hist, info: marketcap_lt_1b(info),
+    "PE_Lt_20": lambda hist, info: pe_lt_20(info),
+    "PE_Gt_40": lambda hist, info: pe_gt_40(info),
+    "EPS_Positive_Growth": lambda hist, info: eps_positive_growth(info),
+    "EPS_Negative_Growth": lambda hist, info: eps_negative_growth(info),
+    "DividendYield_Gt_2": lambda hist, info: dividend_yield_gt_2(info),
+    "DebtEquity_Lt_1": lambda hist, info: debt_equity_lt_1(info),
 }
 
 
@@ -743,6 +752,156 @@ def plot_candlestick(symbol, period="6mo", around_date=None):
 
 
 # ======================================
+# Simple in-memory portfolio for Streamlit
+# ======================================
+
+class StreamlitPortfolio:
+    def __init__(self, cash=100000.0):
+        self.cash = cash
+        # positions: {symbol: {"qty": float, "avg": float, "last_trade": str}}
+        self.positions = {}
+        # trades: list of dicts
+        self.trades = []
+
+    def market_order(self, symbol, side, qty, price):
+        if qty <= 0 or price <= 0:
+            raise ValueError("Quantity and price must be positive")
+
+        cost = qty * price
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if side == "BUY":
+            if self.cash < cost:
+                raise ValueError("Insufficient cash")
+            self.cash -= cost
+            pos = self.positions.get(symbol, {"qty": 0.0, "avg": 0.0, "last_trade": ""})
+            new_qty = pos["qty"] + qty
+            if new_qty <= 0:
+                new_avg = 0.0
+            else:
+                new_avg = (pos["qty"] * pos["avg"] + qty * price) / new_qty
+            self.positions[symbol] = {
+                "qty": new_qty,
+                "avg": new_avg,
+                "last_trade": now_str,
+            }
+
+        elif side == "SELL":
+            pos = self.positions.get(symbol, {"qty": 0.0, "avg": 0.0, "last_trade": ""})
+            if qty > pos["qty"]:
+                raise ValueError("Cannot sell more than position size")
+            self.cash += cost
+            new_qty = pos["qty"] - qty
+            if new_qty == 0:
+                # remove position
+                self.positions.pop(symbol, None)
+            else:
+                self.positions[symbol] = {
+                    "qty": new_qty,
+                    "avg": pos["avg"],
+                    "last_trade": now_str,
+                }
+        else:
+            raise ValueError("Side must be BUY or SELL")
+
+        self.trades.append(
+            {
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "price": price,
+                "time": now_str,
+            }
+        )
+
+    def unrealized_pnl(self, symbol, price):
+        pos = self.positions.get(symbol)
+        if not pos:
+            return 0.0
+        return (price - pos["avg"]) * pos["qty"]
+
+    def to_dataframe(self):
+        """
+        Return a single DataFrame combining positions and trades,
+        tagged by 'record_type' = 'POSITION' or 'TRADE'.
+        """
+        rows = []
+        for s, pos in self.positions.items():
+            rows.append(
+                {
+                    "record_type": "POSITION",
+                    "symbol": s,
+                    "qty": pos["qty"],
+                    "avg": pos["avg"],
+                    "price": None,
+                    "pnl": None,
+                    "last_trade": pos["last_trade"],
+                    "side": None,
+                    "time": None,
+                    "cash": self.cash,
+                }
+            )
+        for t in self.trades:
+            rows.append(
+                {
+                    "record_type": "TRADE",
+                    "symbol": t["symbol"],
+                    "qty": t["qty"],
+                    "avg": None,
+                    "price": t["price"],
+                    "pnl": None,
+                    "last_trade": None,
+                    "side": t["side"],
+                    "time": t["time"],
+                    "cash": self.cash,
+                }
+            )
+        return pd.DataFrame(rows)
+
+    @classmethod
+    def from_dataframe(cls, df):
+        pf = cls()
+        pf.positions = {}
+        pf.trades = []
+        if df.empty:
+            return pf
+
+        last_cash = df["cash"].dropna().iloc[-1]
+        pf.cash = float(last_cash)
+
+        pos_df = df[df["record_type"] == "POSITION"]
+        for _, row in pos_df.iterrows():
+            pf.positions[row["symbol"]] = {
+                "qty": float(row["qty"]),
+                "avg": float(row["avg"]),
+                "last_trade": row.get("last_trade") or "",
+            }
+
+        trade_df = df[df["record_type"] == "TRADE"]
+        for _, row in trade_df.iterrows():
+            pf.trades.append(
+                {
+                    "symbol": row["symbol"],
+                    "side": row["side"],
+                    "qty": float(row["qty"]),
+                    "price": float(row["price"]),
+                    "time": row["time"],
+                }
+            )
+        return pf
+
+
+def load_portfolio_from_disk():
+    if os.path.exists(PORTFOLIO_CSV_PATH):
+        try:
+            df = pd.read_csv(PORTFOLIO_CSV_PATH)
+            return StreamlitPortfolio.from_dataframe(df)
+        except Exception as e:
+            st.warning(f"Failed to load saved portfolio: {e}")
+    return StreamlitPortfolio()
+
+
+# ======================================
 # Pages
 # ======================================
 
@@ -752,7 +911,6 @@ def page_screener():
     if "selected_ticker" not in st.session_state:
         st.session_state["selected_ticker"] = None
 
-    # Sidebar: ticker universe + screening filters
     with st.sidebar:
         st.header("📋 Ticker Universe")
         ticker_source = st.radio(
@@ -762,17 +920,17 @@ def page_screener():
         )
 
         if ticker_source == "Nifty50 (file)":
-            current_tickers = load_tickers_from_file("Nifty50.txt")
+            current_tickers = load_tickers_from_file("nifty50.txt")
             if current_tickers:
-                st.info(f"Using {len(current_tickers)} Nifty50 tickers from Nifty50.txt.")
+                st.info(f"Using {len(current_tickers)} Nifty50 tickers from nifty50.txt.")
             else:
                 st.warning("nifty50.txt is empty or could not be loaded.")
             uploaded_file = None
 
         elif ticker_source == "Nifty500 (file)":
-            current_tickers = load_tickers_from_file("Nifty500.txt")
+            current_tickers = load_tickers_from_file("nifty500.txt")
             if current_tickers:
-                st.info(f"Using {len(current_tickers)} Nifty500 tickers from Nifty500.txt.")
+                st.info(f"Using {len(current_tickers)} Nifty500 tickers from nifty500.txt.")
             else:
                 st.warning("nifty500.txt is empty or could not be loaded.")
             uploaded_file = None
@@ -798,7 +956,6 @@ def page_screener():
 
         run_screen = st.button("🚀 Fetch & Analyze Data", type="primary")
 
-    # Main area: screening results
     if run_screen and current_tickers:
         st.write(f"Fetching 1-year data for {len(current_tickers)} tickers...")
         prog = st.progress(0)
@@ -842,7 +999,6 @@ def page_screener():
             st.write(f"Found **{len(filtered_df)}** matching stocks.")
             st.dataframe(filtered_df, use_container_width=True, height=400)
 
-            # ---- Ticker selection for chart ----
             tickers_in_result = filtered_df["Ticker"].tolist()
             selected_symbol = st.selectbox(
                 "Click/choose a ticker to view its chart:",
@@ -853,7 +1009,6 @@ def page_screener():
             if selected_symbol != "(none)":
                 st.session_state["selected_ticker"] = selected_symbol
 
-            # Quick metrics
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric("Total analyzed", len(df))
@@ -871,7 +1026,6 @@ def page_screener():
                 mime="text/csv",
             )
 
-            # ---- Chart rendering below the table ----
             if st.session_state.get("selected_ticker"):
                 st.markdown("---")
                 st.subheader(f"📉 Chart for {st.session_state['selected_ticker']}")
@@ -880,43 +1034,154 @@ def page_screener():
 
 def page_dashboard():
     st.title("📊 Dashboard")
-
-    # Simple placeholders; you can wire these to real data later
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total Watchlist", 0)
     with col2:
-        st.metric("Open Paper Positions", len(st.session_state.get("paper_trades", [])))
+        open_trades = len(st.session_state.get("portfolio", StreamlitPortfolio()).positions)
+        st.metric("Open Paper Positions", open_trades)
     with col3:
         st.metric("Paper P&L", "0.0%")
-
     st.write("Use this page later to show aggregates from your screener and paper trades.")
 
 
 def page_paper_trading():
     st.title("📝 Paper Trading")
 
-    if "paper_trades" not in st.session_state:
-        st.session_state["paper_trades"] = []
+    if "portfolio" not in st.session_state:
+        st.session_state["portfolio"] = load_portfolio_from_disk()
+    portfolio: StreamlitPortfolio = st.session_state["portfolio"]
 
-    with st.form("paper_trade_form"):
-        ticker = st.text_input("Ticker (e.g. RELIANCE.NS)")
-        side = st.selectbox("Side", ["Buy", "Sell"])
-        qty = st.number_input("Quantity", min_value=1, value=1)
-        price = st.number_input("Price", min_value=0.0, value=0.0, format="%.2f")
-        submitted = st.form_submit_button("Add Trade")
+    if "showing_history" not in st.session_state:
+        st.session_state["showing_history"] = False
 
-    if submitted and ticker and price > 0:
-        st.session_state["paper_trades"].append(
-            {"Ticker": ticker.upper(), "Side": side, "Qty": qty, "Price": price}
-        )
-        st.success("Trade added to paper ledger.")
+    col_toggle, col_cash = st.columns([1, 1])
+    with col_toggle:
+        if st.button(
+            "Show Trade History" if not st.session_state["showing_history"] else "Show Positions"
+        ):
+            st.session_state["showing_history"] = not st.session_state["showing_history"]
+    with col_cash:
+        st.metric("Cash", f"{portfolio.cash:,.2f}")
 
-    trades = st.session_state["paper_trades"]
-    if trades:
-        trades_df = pd.DataFrame(trades)
-        st.subheader("Paper Trade Ledger")
-        st.dataframe(trades_df, use_container_width=True)
+    st.markdown("---")
+
+    with st.form("paper_trade_form", clear_on_submit=False):
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+        with col1:
+            ticker = st.text_input("Symbol", placeholder="RELIANCE.NS")
+        with col2:
+            qty = st.text_input("Qty", value="10")
+        with col3:
+            side = st.selectbox("Side", ["BUY", "SELL"])
+        with col4:
+            use_live_price = st.checkbox("Use live price", value=True)
+
+        manual_price = st.text_input("Manual Price (optional)", value="")
+        submitted = st.form_submit_button("Submit Order")
+
+    if submitted:
+        symbol = (ticker or "").strip().upper()
+        if not symbol:
+            st.error("Symbol required")
+        else:
+            try:
+                q = float(qty)
+            except ValueError:
+                st.error("Invalid quantity")
+                return
+
+            price_val = None
+            if use_live_price:
+                try:
+                    data = yf.Ticker(symbol).history(period="1d")
+                    if not data.empty:
+                        price_val = float(data["Close"].iloc[-1])
+                except Exception as e:
+                    st.error(f"Failed to fetch price: {e}")
+            if (not price_val) and manual_price:
+                try:
+                    price_val = float(manual_price)
+                except ValueError:
+                    st.error("Invalid manual price")
+                    return
+
+            if not price_val:
+                st.error(f"No price available for {symbol}")
+                return
+
+            try:
+                portfolio.market_order(symbol, side, q, price_val)
+                st.success(f"{side} {q} {symbol} @ {price_val:.2f}")
+                df_save = portfolio.to_dataframe()
+                df_save.to_csv(PORTFOLIO_CSV_PATH, index=False)
+            except Exception as e:
+                st.error(str(e))
+
+    if not st.session_state["showing_history"]:
+        st.subheader("Open Positions")
+
+        rows = []
+        for s, pos in portfolio.positions.items():
+            try:
+                data = yf.Ticker(s).history(period="1d")
+                price = float(data["Close"].iloc[-1]) if not data.empty else 0.0
+            except Exception:
+                price = 0.0
+            pnl = portfolio.unrealized_pnl(s, price)
+            rows.append(
+                {
+                    "Symbol": s,
+                    "Qty": pos["qty"],
+                    "Avg": pos["avg"],
+                    "Price": price,
+                    "PnL": pnl,
+                    "LastTrade": pos["last_trade"],
+                }
+            )
+        if rows:
+            pos_df = pd.DataFrame(rows)
+            st.dataframe(pos_df, use_container_width=True)
+        else:
+            st.info("No open positions.")
+    else:
+        st.subheader("Trade History")
+        if portfolio.trades:
+            hist_df = pd.DataFrame(portfolio.trades)
+            hist_df = hist_df[["symbol", "side", "qty", "price", "time"]]
+            hist_df.columns = ["Symbol", "Side", "Qty", "Price", "Time"]
+            st.dataframe(hist_df, use_container_width=True)
+        else:
+            st.info("No trades yet.")
+
+    st.markdown("---")
+
+    st.subheader("Save / Load Portfolio + Trades")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Save to CSV"):
+            df = portfolio.to_dataframe()
+            if df.empty:
+                st.warning("Nothing to save.")
+            else:
+                csv_bytes = df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "Download portfolio.csv",
+                    data=csv_bytes,
+                    file_name="portfolio.csv",
+                    mime="text/csv",
+                )
+    with c2:
+        upload = st.file_uploader("Load from CSV", type=["csv"])
+        if upload is not None:
+            try:
+                df_loaded = pd.read_csv(upload)
+                st.session_state["portfolio"] = StreamlitPortfolio.from_dataframe(df_loaded)
+                st.success("Portfolio + trades loaded from CSV.")
+                df_loaded.to_csv(PORTFOLIO_CSV_PATH, index=False)
+            except Exception as e:
+                st.error(f"Failed to load: {e}")
 
 
 # ======================================
@@ -927,7 +1192,7 @@ st.set_page_config(page_title="Road to Runway", layout="wide")
 
 page = st.sidebar.selectbox(
     "Select page",
-    ["Screener", "Dashboard", "Paper Trading"],
+    ["Dashboard", "Screener", "Paper Trading"],
 )
 
 if page == "Screener":
