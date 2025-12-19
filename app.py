@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -766,44 +765,66 @@ class StreamlitPortfolio:
     def market_order(self, symbol, side, qty, price):
         if qty <= 0 or price <= 0:
             raise ValueError("Quantity and price must be positive")
-
+    
         cost = qty * price
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+    
+        pos = self.positions.get(symbol, {"qty": 0.0, "avg": 0.0, "last_trade": ""})
+        old_qty = pos["qty"]
+    
         if side == "BUY":
-            if self.cash < cost:
-                raise ValueError("Insufficient cash")
+            # For simplicity, allow negative cash (margin not enforced)
             self.cash -= cost
-            pos = self.positions.get(symbol, {"qty": 0.0, "avg": 0.0, "last_trade": ""})
-            new_qty = pos["qty"] + qty
-            if new_qty <= 0:
+            new_qty = old_qty + qty
+    
+            if old_qty == 0:
+                new_avg = price
+            elif (old_qty > 0 and new_qty > 0) or (old_qty < 0 and new_qty < 0):
+                # Adding to existing long or existing short
+                new_avg = (old_qty * pos["avg"] + (qty if new_qty > 0 else -qty) * price) / new_qty
+            elif new_qty == 0:
                 new_avg = 0.0
             else:
-                new_avg = (pos["qty"] * pos["avg"] + qty * price) / new_qty
-            self.positions[symbol] = {
-                "qty": new_qty,
-                "avg": new_avg,
-                "last_trade": now_str,
-            }
-
-        elif side == "SELL":
-            pos = self.positions.get(symbol, {"qty": 0.0, "avg": 0.0, "last_trade": ""})
-            if qty > pos["qty"]:
-                raise ValueError("Cannot sell more than position size")
-            self.cash += cost
-            new_qty = pos["qty"] - qty
+                # Reducing or flipping a short/long; keep avg as previous for remaining side
+                new_avg = pos["avg"]
+    
             if new_qty == 0:
-                # remove position
                 self.positions.pop(symbol, None)
             else:
                 self.positions[symbol] = {
                     "qty": new_qty,
-                    "avg": pos["avg"],
+                    "avg": new_avg,
+                    "last_trade": now_str,
+                }
+    
+        elif side == "SELL":
+            # Selling decreases quantity; for short, qty becomes negative
+            self.cash += cost
+            new_qty = old_qty - qty  # note: SELL reduces qty
+    
+            if old_qty == 0:
+                # Opening a fresh short position
+                new_avg = price
+            elif (old_qty > 0 and new_qty > 0) or (old_qty < 0 and new_qty < 0):
+                # Adding to existing long or existing short
+                new_avg = (old_qty * pos["avg"] - (qty if new_qty < 0 else -qty) * price) / new_qty
+            elif new_qty == 0:
+                new_avg = 0.0
+            else:
+                # Reducing or flipping a long/short; keep avg as previous for remaining side
+                new_avg = pos["avg"]
+    
+            if new_qty == 0:
+                self.positions.pop(symbol, None)
+            else:
+                self.positions[symbol] = {
+                    "qty": new_qty,
+                    "avg": new_avg,
                     "last_trade": now_str,
                 }
         else:
             raise ValueError("Side must be BUY or SELL")
-
+    
         self.trades.append(
             {
                 "symbol": symbol,
@@ -819,6 +840,7 @@ class StreamlitPortfolio:
         if not pos:
             return 0.0
         return (price - pos["avg"]) * pos["qty"]
+
 
     def to_dataframe(self):
         """
