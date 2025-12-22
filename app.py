@@ -14,7 +14,7 @@ import base64
 # ======================================
 
 ELASTIC_EMAIL_API_KEY = os.getenv("ELASTIC_EMAIL_API_KEY", "856B8DC73EC3136F274B87A50540A5271732E58EC0D73CD92C4FF953C957E1B5210E9B7D0CDC5331AE8B22B0EA583241" )
-SENDER_EMAIL = "noreply@elasticemail.com"  # Verified sender
+SENDER_EMAIL = "cydn369@gmail.com"  # Verified sender
 RECIPIENT_EMAIL = "cydn369@gmail.com"
 
 
