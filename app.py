@@ -6,12 +6,16 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
+import requests
+import base64
 
 # ======================================
-# Config
+# Elastic Email config (100 emails/DAY FREE forever)
 # ======================================
 
-PORTFOLIO_CSV_PATH = "portfolio_state.csv"
+ELASTIC_EMAIL_API_KEY = os.getenv("ELASTIC_EMAIL_API_KEY", "856B8DC73EC3136F274B87A50540A5271732E58EC0D73CD92C4FF953C957E1B5210E9B7D0CDC5331AE8B22B0EA583241" )
+SENDER_EMAIL = "noreply@elasticemail.com"  # Verified sender
+RECIPIENT_EMAIL = "cydn369@gmail.com"
 
 
 # ======================================
@@ -912,16 +916,45 @@ class StreamlitPortfolio:
             )
         return pf
 
+# ======================================
+# Email function (Elastic Email - 100/day FREE)
+# ======================================
+def send_portfolio_email(portfolio_df: pd.DataFrame, base_name: str = "portfolio"):
+    """
+    Send portfolio via Elastic Email (100 emails/day FREE forever).
+    """
+    if not ELASTIC_EMAIL_API_KEY or portfolio_df.empty:
+        st.warning("⚠️ Email not configured or empty portfolio.")
+        return
 
-def load_portfolio_from_disk():
-    if os.path.exists(PORTFOLIO_CSV_PATH):
-        try:
-            df = pd.read_csv(PORTFOLIO_CSV_PATH)
-            return StreamlitPortfolio.from_dataframe(df)
-        except Exception as e:
-            st.warning(f"Failed to load saved portfolio: {e}")
-    return StreamlitPortfolio()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{base_name}_{timestamp}.csv"
+    csv_bytes = portfolio_df.to_csv(index=False).encode("utf-8")
+    csv_b64 = base64.b64encode(csv_bytes).decode()
 
+    data = {
+        "apikey": ELASTIC_EMAIL_API_KEY,
+        "from": SENDER_EMAIL,
+        "fromName": "Portfolio Bot",
+        "to": RECIPIENT_EMAIL,
+        "subject": f"{base_name} portfolio export - {timestamp}",
+        "bodyText": f"Attached is your '{base_name}' portfolio export generated at {timestamp}.",
+        "isTransactional": False,
+        "attachments": f"{filename}={csv_b64}"
+    }
+
+    try:
+        response = requests.post(
+            "https://api.elasticemail.com/v2/email/send",
+            data=data
+        )
+
+        if response.status_code == 200:
+            st.success(f"✅ Emailed '{filename}' via Elastic Email")
+        else:
+            st.error(f"Elastic Email failed: {response.text}")
+    except Exception as e:
+        st.error(f"Email failed: {e}")
 
 # ======================================
 # Pages
@@ -1070,48 +1103,83 @@ def page_dashboard():
 def page_paper_trading():
     st.title("📝 Paper Trading")
 
-    if "portfolio" not in st.session_state:
-        st.session_state["portfolio"] = load_portfolio_from_disk()
+    # ======================================
+    # Portfolio selection - NO AUTO-LOAD
+    # ======================================
+    if "portfolio" not in st.session_state or st.session_state["portfolio"].cash == 0:
+        st.markdown("### 🚀 **Start new or load portfolio?**")
+        col_new, col_load = st.columns(2)
+
+        with col_new:
+            if st.button("💎 **New Portfolio**<br>₹1,00,000 cash", use_container_width=True, help="Start fresh"):
+                st.session_state["portfolio"] = StreamlitPortfolio(cash=100000.0)
+                st.session_state["portfolio_name"] = "new_portfolio"
+                st.rerun()
+
+        with col_load:
+            st.markdown("**📁 Load existing**")
+            uploaded_file = st.file_uploader("Upload portfolio CSV", type=["csv"])
+            if uploaded_file:
+                try:
+                    original_name = uploaded_file.name.replace('.csv', '')
+                    st.session_state["portfolio_name"] = original_name
+
+                    df_loaded = pd.read_csv(uploaded_file)
+                    st.session_state["portfolio"] = StreamlitPortfolio.from_dataframe(df_loaded)
+                    st.success(f"✅ Loaded **{original_name}** portfolio")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Failed to load: {e}")
+
+        st.stop()
+
+    # ======================================
+    # Trading UI
+    # ======================================
     portfolio: StreamlitPortfolio = st.session_state["portfolio"]
+    portfolio_name = st.session_state.get("portfolio_name", "portfolio")
 
     if "showing_history" not in st.session_state:
         st.session_state["showing_history"] = False
 
-    col_toggle, col_cash = st.columns([1, 1])
+    # Header
+    col_toggle, col_cash, col_name = st.columns([1, 1, 2])
     with col_toggle:
-        if st.button(
-            "Show Trade History" if not st.session_state["showing_history"] else "Show Positions"
-        ):
+        if st.button("📋 " + ("**History**" if not st.session_state["showing_history"] else "**Positions**")):
             st.session_state["showing_history"] = not st.session_state["showing_history"]
+            st.rerun()
     with col_cash:
-        st.metric("Cash", f"{portfolio.cash:,.2f}")
+        st.metric("💰 Cash", f"₹{portfolio.cash:,.0f}")
+    with col_name:
+        st.caption(f"📂 Active: **{portfolio_name}**")
 
     st.markdown("---")
 
+    # Trading form
     with st.form("paper_trade_form", clear_on_submit=False):
         col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
         with col1:
-            ticker = st.text_input("Symbol", placeholder="RELIANCE.NS")
+            ticker = st.text_input("Symbol", placeholder="RELIANCE.NS", help="e.g. RELIANCE.NS, TCS.NS")
         with col2:
             qty = st.text_input("Qty", value="10")
         with col3:
             side = st.selectbox("Side", ["BUY", "SELL"])
         with col4:
-            use_live_price = st.checkbox("Use live price", value=True)
+            use_live_price = st.checkbox("Live price", value=True)
 
         manual_price = st.text_input("Manual Price (optional)", value="")
-        submitted = st.form_submit_button("Submit Order")
+        submitted = st.form_submit_button("🚀 **Submit Order**", use_container_width=True)
 
     if submitted:
         symbol = (ticker or "").strip().upper()
         if not symbol:
-            st.error("Symbol required")
+            st.error("⚠️ **Symbol required**")
         else:
             try:
                 q = float(qty)
             except ValueError:
-                st.error("Invalid quantity")
-                return
+                st.error("⚠️ **Invalid quantity**")
+                st.stop()
 
             price_val = None
             if use_live_price:
@@ -1120,29 +1188,29 @@ def page_paper_trading():
                     if not data.empty:
                         price_val = float(data["Close"].iloc[-1])
                 except Exception as e:
-                    st.error(f"Failed to fetch price: {e}")
+                    st.error(f"⚠️ Failed to fetch price: {e}")
+
             if (not price_val) and manual_price:
                 try:
                     price_val = float(manual_price)
                 except ValueError:
-                    st.error("Invalid manual price")
-                    return
+                    st.error("⚠️ **Invalid manual price**")
+                    st.stop()
 
             if not price_val:
-                st.error(f"No price available for {symbol}")
-                return
+                st.error(f"⚠️ **No price available for {symbol}**")
+                st.stop()
 
             try:
                 portfolio.market_order(symbol, side, q, price_val)
-                st.success(f"{side} {q} {symbol} @ {price_val:.2f}")
-                df_save = portfolio.to_dataframe()
-                df_save.to_csv(PORTFOLIO_CSV_PATH, index=False)
+                st.success(f"✅ **{side} {q} {symbol} @ ₹{price_val:,.0f}**")
+                st.rerun()
             except Exception as e:
-                st.error(str(e))
+                st.error(f"❌ **Trade failed: {e}**")
 
+    # Positions or History
     if not st.session_state["showing_history"]:
-        st.subheader("Open Positions")
-
+        st.subheader("📊 **Open Positions**")
         rows = []
         for s, pos in portfolio.positions.items():
             try:
@@ -1151,60 +1219,58 @@ def page_paper_trading():
             except Exception:
                 price = 0.0
             pnl = portfolio.unrealized_pnl(s, price)
-            rows.append(
-                {
-                    "Symbol": s,
-                    "Qty": pos["qty"],
-                    "Avg": pos["avg"],
-                    "Price": price,
-                    "PnL": pnl,
-                    "LastTrade": pos["last_trade"],
-                }
-            )
+            rows.append({
+                "Symbol": s,
+                "Qty": f"{pos['qty']:.0f}",
+                "Avg": f"₹{pos['avg']:,.0f}",
+                "Price": f"₹{price:,.0f}",
+                "PnL": f"₹{pnl:,.0f}",
+                "Last Trade": pos["last_trade"],
+            })
         if rows:
             pos_df = pd.DataFrame(rows)
             st.dataframe(pos_df, use_container_width=True)
         else:
-            st.info("No open positions.")
+            st.info("📭 **No open positions**")
     else:
-        st.subheader("Trade History")
+        st.subheader("📜 **Trade History**")
         if portfolio.trades:
             hist_df = pd.DataFrame(portfolio.trades)
             hist_df = hist_df[["symbol", "side", "qty", "price", "time"]]
             hist_df.columns = ["Symbol", "Side", "Qty", "Price", "Time"]
             st.dataframe(hist_df, use_container_width=True)
         else:
-            st.info("No trades yet.")
+            st.info("📭 **No trades yet**")
 
+    # ======================================
+    # Export section
+    # ======================================
     st.markdown("---")
-
-    st.subheader("Save / Load Portfolio + Trades")
+    st.subheader("💾 **Export Portfolio**")
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Save to CSV"):
+        send_email = st.checkbox("📧 **Also email export**")
+        if st.button("📥 **Save / Export Portfolio**", use_container_width=True):
             df = portfolio.to_dataframe()
             if df.empty:
-                st.warning("Nothing to save.")
+                st.warning("⚠️ **Nothing to export**")
             else:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                base_name = portfolio_name
+                filename = f"{base_name}_{timestamp}.csv"
                 csv_bytes = df.to_csv(index=False).encode("utf-8")
                 st.download_button(
-                    "Download portfolio.csv",
+                    "⬇️ **Download**",
                     data=csv_bytes,
-                    file_name="portfolio.csv",
+                    file_name=filename,
                     mime="text/csv",
+                    use_container_width=True
                 )
+                if send_email:
+                    send_portfolio_email(df, base_name)
     with c2:
-        upload = st.file_uploader("Load from CSV", type=["csv"])
-        if upload is not None:
-            try:
-                df_loaded = pd.read_csv(upload)
-                st.session_state["portfolio"] = StreamlitPortfolio.from_dataframe(df_loaded)
-                st.success("Portfolio + trades loaded from CSV.")
-                df_loaded.to_csv(PORTFOLIO_CSV_PATH, index=False)
-            except Exception as e:
-                st.error(f"Failed to load: {e}")
-
+        st.info("💡 **Click New Portfolio or upload CSV to switch profiles**")
 
 # ======================================
 # Main app entry
