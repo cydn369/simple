@@ -6,17 +6,6 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
-import requests
-import base64
-
-# ======================================
-# Elastic Email config (100 emails/DAY FREE forever)
-# ======================================
-
-ELASTIC_EMAIL_API_KEY = os.getenv("ELASTIC_EMAIL_API_KEY", "856B8DC73EC3136F274B87A50540A5271732E58EC0D73CD92C4FF953C957E1B5210E9B7D0CDC5331AE8B22B0EA583241" )
-SENDER_EMAIL = "cydn369@gmail.com"  # Verified sender
-RECIPIENT_EMAIL = "cydn369@gmail.com"
-
 
 # ======================================
 # Load Nifty tickers from local files
@@ -564,13 +553,12 @@ def volume_spike(hist, lookback=20):
     avg_vol = hist["Volume"].rolling(lookback).mean().iloc[-1]
     return hist["Volume"].iloc[-1] > 1.5 * avg_vol
 
-
 # ======================================
 # Financial indicators
 # ======================================
 
-def marketcap_gt_1b(info):
-    return info.get("marketCap", 0) > 1_000_000_000
+def marketcap_gt_10b(info):
+    return info.get("marketCap", 0) > 10_000_000_000
 
 
 def marketcap_lt_1b(info):
@@ -651,7 +639,7 @@ INDICATOR_CHECKS = {
     "Volume_Spike": lambda hist, info: volume_spike(hist),
 
     # Financial
-    "MarketCap_Gt_1B": lambda hist, info: marketcap_gt_1b(info),
+    "MarketCap_Gt_10B": lambda hist, info: marketcap_gt_10b(info),
     "MarketCap_Lt_1B": lambda hist, info: marketcap_lt_1b(info),
     "PE_Lt_20": lambda hist, info: pe_lt_20(info),
     "PE_Gt_40": lambda hist, info: pe_gt_40(info),
@@ -710,7 +698,6 @@ def parse_ticker_file(uploaded_file):
     except Exception as e:
         st.error(f"Error parsing file: {e}")
         return []
-
 
 def plot_candlestick(symbol, period="6mo", around_date=None):
     ticker = yf.Ticker(symbol)
@@ -917,46 +904,6 @@ class StreamlitPortfolio:
         return pf
 
 # ======================================
-# Email function (Elastic Email - 100/day FREE)
-# ======================================
-def send_portfolio_email(portfolio_df: pd.DataFrame, base_name: str = "portfolio"):
-    """
-    Send portfolio via Elastic Email (100 emails/day FREE forever).
-    """
-    if not ELASTIC_EMAIL_API_KEY or portfolio_df.empty:
-        st.warning("⚠️ Email not configured or empty portfolio.")
-        return
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{base_name}_{timestamp}.csv"
-    csv_bytes = portfolio_df.to_csv(index=False).encode("utf-8")
-    csv_b64 = base64.b64encode(csv_bytes).decode()
-
-    data = {
-        "apikey": ELASTIC_EMAIL_API_KEY,
-        "from": SENDER_EMAIL,
-        "fromName": "Portfolio Bot",
-        "to": RECIPIENT_EMAIL,
-        "subject": f"{base_name} portfolio export - {timestamp}",
-        "bodyText": f"Attached is your '{base_name}' portfolio export generated at {timestamp}.",
-        "isTransactional": False,
-        "attachments": f"{filename}={csv_b64}"
-    }
-
-    try:
-        response = requests.post(
-            "https://api.elasticemail.com/v2/email/send",
-            data=data
-        )
-
-        if response.status_code == 200:
-            st.success(f"✅ Emailed '{filename}' via Elastic Email")
-        else:
-            st.error(f"Elastic Email failed: {response.text}")
-    except Exception as e:
-        st.error(f"Email failed: {e}")
-
-# ======================================
 # Pages
 # ======================================
 
@@ -1111,8 +1058,8 @@ def page_paper_trading():
         col_new, col_load = st.columns(2)
 
         with col_new:
-            if st.button("💎 **New Portfolio**<br>₹1,00,000 cash", use_container_width=True, help="Start fresh"):
-                st.session_state["portfolio"] = StreamlitPortfolio(cash=100000.0)
+            if st.button("💎 **New Portfolio** ₹10,00,000 cash", use_container_width=True, help="Start fresh"):
+                st.session_state["portfolio"] = StreamlitPortfolio(cash=1000000.0)
                 st.session_state["portfolio_name"] = "new_portfolio"
                 st.rerun()
 
@@ -1267,8 +1214,6 @@ def page_paper_trading():
                     mime="text/csv",
                     use_container_width=True
                 )
-                if send_email:
-                    send_portfolio_email(df, base_name)
     with c2:
         st.info("💡 **Click New Portfolio or upload CSV to switch profiles**")
 
