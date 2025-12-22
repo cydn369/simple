@@ -746,7 +746,7 @@ def plot_candlestick(symbol, period="6mo", around_date=None):
 # ======================================
 
 class StreamlitPortfolio:
-    def __init__(self, cash=100000.0):
+    def __init__(self, cash=1000000.0):
         self.cash = cash
         # positions: {symbol: {"qty": float, "avg": float, "last_trade": str}}
         self.positions = {}
