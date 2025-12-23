@@ -664,7 +664,7 @@ def plotcandlestick(symbol, period="6mo", arounddate=None):
         shared_xaxes=True,
         vertical_spacing=0.03,
         subplot_titles=('OHLC', 'Volume'),
-        row_width=[0.6, 0.4]  # 60% height for candlesticks, 40% for volume (1.5:1 ratio)
+        row_width=[0.8, 0.2]  # 60% height for candlesticks, 40% for volume (1.5:1 ratio)
     )
     
     # Candlestick (row 1)
