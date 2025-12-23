@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # ======================================
 # Load Nifty tickers from local files
