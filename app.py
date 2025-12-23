@@ -911,7 +911,7 @@ def page_historical_analysis():
     
     # 3. Pattern selection
     st.subheader("Select Patterns")
-    available_patterns = [k for k in INDICATORCHECKS.keys() if "RSI" not in k and "MACD" not in k and "VolumeSpike" not in k]  # Candlestick focus
+    available_patterns = [k for k in INDICATOR_CHECKS.keys() if "RSI" not in k and "MACD" not in k and "VolumeSpike" not in k]  # Candlestick focus
     selected_patterns = st.multiselect(
         "Choose patterns (ANY match):", 
         options=available_patterns,
@@ -946,7 +946,7 @@ def page_historical_analysis():
                 detections = []
                 for i in range(10, len(hist)):  # Start after min pattern length
                     window = hist.iloc[max(0, i-20):i+1]  # 20-day lookback window
-                    for pattern_name, pattern_fn in INDICATORCHECKS.items():
+                    for pattern_name, pattern_fn in INDICATOR_CHECKS.items():
                         if pattern_name in selected_patterns:
                             if pattern_fn(window, info):
                                 prior_price_trend = priortrend(window['Close'], lookback=14)
