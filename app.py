@@ -653,20 +653,24 @@ def plotcandlestick(symbol, period="6mo", arounddate=None):
     
     if hist is None or hist.empty:
         st.warning(f"No chart data available for {symbol}")
-        return
+        return None
     
-    hist.reset_index()
+    # FIX: Call reset_index() properly and assign back
+    hist = hist.reset_index()  # This creates the 'Date' column
     
-    # Create subplots: 2 rows (OHLC top, Volume bottom)
+    from plotly.subplots import make_subplots
+    import plotly.graph_objects as go
+    
+    # Create subplots
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.03,
         subplot_titles=('OHLC', 'Volume'),
-        row_width=[0.7, 0.3]  # Make volume subplot smaller
+        row_width=[0.7, 0.3]
     )
     
-    # Candlestick trace (row 1)
+    # Candlestick (row 1)
     fig.add_trace(
         go.Candlestick(
             x=hist['Date'],
@@ -679,7 +683,7 @@ def plotcandlestick(symbol, period="6mo", arounddate=None):
         row=1, col=1
     )
     
-    # Volume bars (row 2) - green for up days, red for down days
+    # Volume bars (row 2)
     colors = ['green' if row['Close'] >= row['Open'] else 'red' 
               for _, row in hist.iterrows()]
     fig.add_trace(
@@ -702,6 +706,7 @@ def plotcandlestick(symbol, period="6mo", arounddate=None):
     )
     
     st.plotly_chart(fig, use_container_width=True)
+    return hist  # Return for other uses
 # ======================================
 # Simple in-memory portfolio for Streamlit
 # ======================================
