@@ -915,7 +915,7 @@ def page_historical_analysis():
     selected_patterns = st.multiselect(
         "Choose patterns (ANY match):", 
         options=available_patterns,
-        default=["Hammer", "BullishEngulfing", "Doji"]
+        default=["Doji"]
     )
     
     # 4. Analysis button
