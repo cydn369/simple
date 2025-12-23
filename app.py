@@ -876,7 +876,7 @@ def page_historical_analysis():
         tickersource = st.radio("Ticker Source:", ["Nifty500 file", "Upload custom"], index=0)
         
         if tickersource == "Nifty500 file":
-            currenttickers = loadtickersfromfile("Nifty500.txt")
+            currenttickers = load_tickers_from_file("Nifty500.txt")
             if currenttickers:
                 st.info(f"Using {len(currenttickers)} Nifty500 tickers")
             else:
