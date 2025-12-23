@@ -637,45 +637,69 @@ def parse_ticker_file(uploaded_file):
         st.error(f"Error parsing file: {e}")
         return []
 
-def plot_candlestick(symbol, period="6mo", around_date=None):
+def plotcandlestick(symbol, period="6mo", arounddate=None):
     ticker = yf.Ticker(symbol)
-    if around_date is not None:
-        if isinstance(around_date, str):
-            around_date = pd.to_datetime(around_date)
-        start_date = around_date - pd.Timedelta(days=15)
-        end_date = around_date + pd.Timedelta(days=15)
-        hist = ticker.history(start=start_date, end=end_date)
-        title = f"{symbol} chart around {around_date.date()}"
+    if arounddate is not None:
+        if isinstance(arounddate, str):
+            arounddate = pd.to_datetime(arounddate)
+        startdate = arounddate - pd.Timedelta(days=15)
+        enddate = arounddate + pd.Timedelta(days=15)
+        hist = ticker.history(start=startdate, end=enddate)
+        title = f"{symbol} chart around {arounddate.date()}"
     else:
         hist = ticker.history(period=period)
         title = f"{symbol} {period} chart"
-
+    
     if hist is None or hist.empty:
         st.warning(f"No chart data available for {symbol}")
         return
-
-    hist = hist.reset_index()
-    fig = go.Figure(
-        data=[
-            go.Candlestick(
-                x=hist["Date"],
-                open=hist["Open"],
-                high=hist["High"],
-                low=hist["Low"],
-                close=hist["Close"],
-                name=symbol,
-            )
-        ]
+    
+    hist.reset_index()
+    
+    # Create subplots: 2 rows (OHLC top, Volume bottom)
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        subplot_titles=('OHLC', 'Volume'),
+        row_width=[0.7, 0.3]  # Make volume subplot smaller
     )
+    
+    # Candlestick trace (row 1)
+    fig.add_trace(
+        go.Candlestick(
+            x=hist['Date'],
+            open=hist['Open'],
+            high=hist['High'],
+            low=hist['Low'],
+            close=hist['Close'],
+            name=symbol
+        ),
+        row=1, col=1
+    )
+    
+    # Volume bars (row 2) - green for up days, red for down days
+    colors = ['green' if row['Close'] >= row['Open'] else 'red' 
+              for _, row in hist.iterrows()]
+    fig.add_trace(
+        go.Bar(
+            x=hist['Date'],
+            y=hist['Volume'],
+            name='Volume',
+            marker_color=colors,
+            showlegend=False
+        ),
+        row=2, col=1
+    )
+    
     fig.update_layout(
         title=title,
-        xaxis_title="Date",
-        yaxis_title="Price",
+        yaxis_title='Price',
         xaxis_rangeslider_visible=False,
-        template="plotly_white",
-        height=500,
+        template='plotly_white',
+        height=600
     )
-
+    
     st.plotly_chart(fig, use_container_width=True)
 # ======================================
 # Simple in-memory portfolio for Streamlit
