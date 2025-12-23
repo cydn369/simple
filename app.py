@@ -867,7 +867,7 @@ class StreamlitPortfolio:
 # ======================================
 # Pages
 # ======================================
-def pagehistoricalanalysis():
+def page_historical_analysis():
     st.title("Historical Analysis")
     
     # 1. Ticker selection (Nifty500 or custom)
@@ -1336,11 +1336,11 @@ st.set_page_config(page_title="Road to Runway", layout="wide")
 page = st.sidebar.selectbox("Select page:", ["Dashboard", "Screener", "Paper Trading", "Historical Analysis"])
 
 if page == "Screener":
-    pagescreener()
+    page_screener()
 elif page == "Dashboard":
-    pagedashboard()
+    page_dashboard()
 elif page == "Paper Trading":
-    pagepapertrading()
+    page_paper_trading()
 elif page == "Historical Analysis":
-    pagehistoricalanalysis()  # Add this
+    page_historical_analysis()  # Add this
 
