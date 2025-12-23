@@ -658,16 +658,13 @@ def plotcandlestick(symbol, period="6mo", arounddate=None):
     # FIX: Call reset_index() properly and assign back
     hist = hist.reset_index()  # This creates the 'Date' column
     
-    from plotly.subplots import make_subplots
-    import plotly.graph_objects as go
-    
     # Create subplots
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.03,
         subplot_titles=('OHLC', 'Volume'),
-        row_width=[0.7, 0.3]
+        row_width=[0.6, 0.4]  # 60% height for candlesticks, 40% for volume (1.5:1 ratio)
     )
     
     # Candlestick (row 1)
