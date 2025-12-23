@@ -29,17 +29,13 @@ def load_tickers_from_file(filename):
     except Exception as e:
         st.error(f"Error loading {filename}: {e}")
         return []
-
-
 # ======================================
 # Simple trend utilities
 # ======================================
-
 def prior_trend(prices, lookback=14):
     if len(prices) < lookback:
         return "N/A"
     return "Uptrend" if prices.iloc[-1] > prices.iloc[-lookback] else "Downtrend"
-
 
 def prior_volume_trend(volumes, lookback=10):
     if len(volumes) < 2 * lookback:
@@ -47,12 +43,9 @@ def prior_volume_trend(volumes, lookback=10):
     recent = volumes.iloc[-lookback:].mean()
     prior = volumes.iloc[-2 * lookback:-lookback].mean()
     return "Increasing" if recent > prior else "Decreasing"
-
-
 # ======================================
 # Chart indicators (candlestick patterns)
 # ======================================
-
 def bullish_marubozu(hist):
     if len(hist) < 2:
         return False
@@ -64,7 +57,6 @@ def bullish_marubozu(hist):
     confirm = hist.iloc[-1]
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > h
     return pattern_ok and confirm_ok
-
 
 def bearish_marubozu(hist):
     if len(hist) < 2:
@@ -78,7 +70,6 @@ def bearish_marubozu(hist):
     confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < l
     return pattern_ok and confirm_ok
 
-
 def doji(hist):
     if len(hist) < 1:
         return False
@@ -87,7 +78,6 @@ def doji(hist):
     if rng == 0:
         return False
     return abs(last["Close"] - last["Open"]) <= 0.2 * rng
-
 
 def hammer(hist):
     if len(hist) < 2:
@@ -100,7 +90,6 @@ def hammer(hist):
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
     return pattern_ok and confirm_ok
 
-
 def inverted_hammer(hist):
     if len(hist) < 2:
         return False
@@ -111,7 +100,6 @@ def inverted_hammer(hist):
     pattern_ok = upper_shadow >= 1.5 * body and lower_shadow <= 1.5 * body
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
     return pattern_ok and confirm_ok
-
 
 def bullish_engulfing(hist):
     if len(hist) < 3:
@@ -126,7 +114,6 @@ def bullish_engulfing(hist):
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
     return pattern_ok and confirm_ok
 
-
 def bearish_engulfing(hist):
     if len(hist) < 3:
         return False
@@ -139,7 +126,6 @@ def bearish_engulfing(hist):
     )
     confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < pattern["Low"]
     return pattern_ok and confirm_ok
-
 
 def morning_star(hist):
     if len(hist) < 4:
@@ -155,7 +141,6 @@ def morning_star(hist):
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > c["High"]
     return pattern_ok and confirm_ok
 
-
 def evening_star(hist):
     if len(hist) < 4:
         return False
@@ -170,7 +155,6 @@ def evening_star(hist):
     confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < c["Low"]
     return pattern_ok and confirm_ok
 
-
 def piercing_line(hist):
     if len(hist) < 3:
         return False
@@ -184,7 +168,6 @@ def piercing_line(hist):
     confirm_ok = confirm["Close"] > confirm["Open"] and confirm["Close"] > pattern["High"]
     return pattern_ok and confirm_ok
 
-
 def dark_cloud_cover(hist):
     if len(hist) < 3:
         return False
@@ -197,7 +180,6 @@ def dark_cloud_cover(hist):
     )
     confirm_ok = confirm["Close"] < confirm["Open"] and confirm["Close"] < pattern["Low"]
     return pattern_ok and confirm_ok
-
 
 def spinning_top(hist):
     if len(hist) < 1:
@@ -215,7 +197,6 @@ def spinning_top(hist):
         lower_shadow >= 0.5 * body
     )
 
-
 def rising_three_methods(hist):
     if len(hist) < 5:
         return False
@@ -229,7 +210,6 @@ def rising_three_methods(hist):
     ])
     cond3 = e["Close"] > e["Open"] and e["Close"] > a["Close"]
     return cond1 and cond2 and cond3
-
 
 def abandoned_baby(hist):
     if len(hist) < 3:
@@ -251,7 +231,6 @@ def abandoned_baby(hist):
     )
     return bullish or bearish
 
-
 def three_inside_up(hist):
     if len(hist) < 3:
         return False
@@ -264,7 +243,6 @@ def three_inside_up(hist):
     )
     cond3 = c["Close"] > c["Open"] and c["Close"] > a["Open"]
     return cond1 and cond2 and cond3
-
 
 def three_inside_down(hist):
     if len(hist) < 3:
@@ -279,7 +257,6 @@ def three_inside_down(hist):
     cond3 = c["Close"] < c["Open"] and c["Close"] < a["Open"]
     return cond1 and cond2 and cond3
 
-
 def bullish_tasuki_gap(hist):
     if len(hist) < 3:
         return False
@@ -292,7 +269,6 @@ def bullish_tasuki_gap(hist):
     )
     cond3 = c["Close"] > c["Open"] and c["Close"] > a["Close"]
     return cond1 and cond2 and cond3
-
 
 def bearish_tasuki_gap(hist):
     if len(hist) < 3:
@@ -307,7 +283,6 @@ def bearish_tasuki_gap(hist):
     cond3 = c["Close"] < c["Open"] and c["Close"] < a["Close"]
     return cond1 and cond2 and cond3
 
-
 def mat_hold(hist):
     if len(hist) < 5:
         return False
@@ -320,7 +295,6 @@ def mat_hold(hist):
     ])
     cond3 = e["Close"] > e["Open"] and e["Close"] > a["Close"]
     return cond1 and cond2 and cond3
-
 
 def kicking(hist):
     if len(hist) < 2:
@@ -342,7 +316,6 @@ def kicking(hist):
     gap_down = (a["Close"] > a["Open"] and b["Open"] < a["Low"])
     return cond1 and cond2 and (gap_up or gap_down)
 
-
 def three_white_soldiers(hist):
     if len(hist) < 3:
         return False
@@ -358,7 +331,6 @@ def three_white_soldiers(hist):
     cond2 = is_strong_bullish(b) and b["Open"] >= a["Open"] and b["Open"] <= a["Close"] and b["Close"] > a["Close"]
     cond3 = is_strong_bullish(c) and c["Open"] >= b["Open"] and c["Open"] <= b["Close"] and c["Close"] > b["Close"]
     return cond1 and cond2 and cond3
-
 
 def three_black_crows(hist):
     if len(hist) < 3:
@@ -376,7 +348,6 @@ def three_black_crows(hist):
     cond3 = is_strong_bearish(c) and c["Open"] <= b["Open"] and c["Open"] >= b["Close"] and c["Close"] < b["Close"]
     return cond1 and cond2 and cond3
 
-
 def rising_window(hist):
     if len(hist) < 2:
         return False
@@ -386,7 +357,6 @@ def rising_window(hist):
     cond3 = b["Low"] > a["High"]
     return cond1 and cond2 and cond3
 
-
 def falling_window(hist):
     if len(hist) < 2:
         return False
@@ -395,7 +365,6 @@ def falling_window(hist):
     cond2 = b["Close"] < b["Open"]
     cond3 = b["High"] < a["Low"]
     return cond1 and cond2 and cond3
-
 
 def bullish_separating_lines(hist):
     if len(hist) < 2:
@@ -410,7 +379,6 @@ def bullish_separating_lines(hist):
     cond4 = b["Close"] > a["Close"]
     return cond1 and cond2 and cond3 and cond4
 
-
 def bearish_separating_lines(hist):
     if len(hist) < 2:
         return False
@@ -424,7 +392,6 @@ def bearish_separating_lines(hist):
     cond4 = b["Close"] < a["Close"]
     return cond1 and cond2 and cond3 and cond4
 
-
 def upside_gap_two_crows(hist):
     if len(hist) < 3:
         return False
@@ -433,7 +400,6 @@ def upside_gap_two_crows(hist):
     cond2 = (b["Close"] < b["Open"] and b["Open"] > a["Close"] and b["Close"] > a["Close"])
     cond3 = (c["Close"] < c["Open"] and c["Open"] > b["Open"] and c["Close"] < b["Close"] and c["Close"] > a["Close"])
     return cond1 and cond2 and cond3
-
 
 def on_neck(hist):
     if len(hist) < 2:
@@ -447,7 +413,6 @@ def on_neck(hist):
     cond3 = b["Open"] < a["Close"] and abs(b["Close"] - a["Close"]) <= 0.1 * rng
     return cond1 and cond2 and cond3
 
-
 def in_neck(hist):
     if len(hist) < 2:
         return False
@@ -456,7 +421,6 @@ def in_neck(hist):
     cond2 = b["Close"] > b["Open"]
     cond3 = b["Open"] < a["Close"] and b["Close"] > a["Close"] and b["Close"] < a["Open"]
     return cond1 and cond2 and cond3
-
 
 def thrusting(hist):
     if len(hist) < 2:
@@ -467,7 +431,6 @@ def thrusting(hist):
     cond2 = b["Close"] > b["Open"]
     cond3 = b["Open"] < a["Close"] and b["Close"] > midpoint and b["Close"] < a["Open"]
     return cond1 and cond2 and cond3
-
 
 def deliberation(hist):
     if len(hist) < 3:
@@ -484,12 +447,9 @@ def deliberation(hist):
         abs(c["Close"] - b["Close"]) <= 0.1 * (b["High"] - b["Low"])
     )
     return cond1 and cond2 and cond3
-
-
 # ======================================
 # Technical indicators
 # ======================================
-
 def rsi(hist, period=14):
     if len(hist) < period + 1:
         return None
@@ -502,7 +462,6 @@ def rsi(hist, period=14):
     rsi_series = 100 - (100 / (1 + rs))
     return float(rsi_series.iloc[-1])
 
-
 def macd(hist, fast=12, slow=26, signal=9):
     if len(hist) < slow + signal:
         return None
@@ -512,7 +471,6 @@ def macd(hist, fast=12, slow=26, signal=9):
     signal_line = macd_line.ewm(span=signal).mean()
     return float(macd_line.iloc[-1]), float(signal_line.iloc[-1])
 
-
 def golden_cross(hist):
     if len(hist) < 200:
         return False
@@ -520,14 +478,12 @@ def golden_cross(hist):
     ma200 = hist["Close"].rolling(200).mean()
     return ma50.iloc[-2] <= ma200.iloc[-2] and ma50.iloc[-1] > ma200.iloc[-1]
 
-
 def death_cross(hist):
     if len(hist) < 200:
         return False
     ma50 = hist["Close"].rolling(50).mean()
     ma200 = hist["Close"].rolling(200).mean()
     return ma50.iloc[-2] >= ma200.iloc[-2] and ma50.iloc[-1] < ma200.iloc[-1]
-
 
 def bollinger_breakout(hist, period=20, num_std=2):
     if len(hist) < period + 1:
@@ -537,7 +493,6 @@ def bollinger_breakout(hist, period=20, num_std=2):
     upper = ma + num_std * std
     return hist["Close"].iloc[-2] <= upper.iloc[-2] and hist["Close"].iloc[-1] > upper.iloc[-1]
 
-
 def bollinger_breakdown(hist, period=20, num_std=2):
     if len(hist) < period + 1:
         return False
@@ -546,53 +501,40 @@ def bollinger_breakdown(hist, period=20, num_std=2):
     lower = ma - num_std * std
     return hist["Close"].iloc[-2] >= lower.iloc[-2] and hist["Close"].iloc[-1] < lower.iloc[-1]
 
-
 def volume_spike(hist, lookback=20):
     if len(hist) < lookback:
         return False
     avg_vol = hist["Volume"].rolling(lookback).mean().iloc[-1]
     return hist["Volume"].iloc[-1] > 1.5 * avg_vol
-
 # ======================================
 # Financial indicators
 # ======================================
-
 def marketcap_gt_10b(info):
     return info.get("marketCap", 0) > 10_000_000_000
-
 
 def marketcap_lt_1b(info):
     return info.get("marketCap", 0) < 1_000_000_000
 
-
 def pe_lt_20(info):
     return info.get("trailingPE", 999) < 20
-
 
 def pe_gt_40(info):
     return info.get("trailingPE", 0) > 40
 
-
 def eps_positive_growth(info):
     return info.get("earningsGrowth", 0) > 0
-
 
 def eps_negative_growth(info):
     return info.get("earningsGrowth", 0) < 0
 
-
 def dividend_yield_gt_2(info):
     return info.get("dividendYield", 0) and info["dividendYield"] > 0.02
 
-
 def debt_equity_lt_1(info):
     return info.get("debtToEquity", 999) < 1
-
-
 # ======================================
 # Indicator mapping
 # ======================================
-
 INDICATOR_CHECKS = {
     # Chart patterns
     "Bullish_Marubozu": lambda hist, info: bullish_marubozu(hist),
@@ -648,12 +590,9 @@ INDICATOR_CHECKS = {
     "DividendYield_Gt_2": lambda hist, info: dividend_yield_gt_2(info),
     "DebtEquity_Lt_1": lambda hist, info: debt_equity_lt_1(info),
 }
-
-
 # ======================================
 # Data fetch and ticker parsing
 # ======================================
-
 @st.cache_data
 def fetch_stock_data(ticker):
     """Fetch data once per ticker and compute all indicators."""
@@ -685,7 +624,6 @@ def fetch_stock_data(ticker):
     except Exception as e:
         st.warning(f"Error fetching {ticker}: {e}")
         return None
-
 
 def parse_ticker_file(uploaded_file):
     try:
@@ -739,12 +677,9 @@ def plot_candlestick(symbol, period="6mo", around_date=None):
     )
 
     st.plotly_chart(fig, use_container_width=True)
-
-
 # ======================================
 # Simple in-memory portfolio for Streamlit
 # ======================================
-
 class StreamlitPortfolio:
     def __init__(self, cash=1000000.0):
         self.cash = cash
@@ -902,11 +837,9 @@ class StreamlitPortfolio:
                 }
             )
         return pf
-
 # ======================================
 # Pages
 # ======================================
-
 def page_screener():
     st.title("📈 Road to Runway")
 
@@ -1033,7 +966,6 @@ def page_screener():
                 st.subheader(f"📉 Chart for {st.session_state['selected_ticker']}")
                 plot_candlestick(st.session_state["selected_ticker"])
 
-
 def page_dashboard():
     st.title("📊 Dashboard")
     col1, col2, col3 = st.columns(3)
@@ -1046,10 +978,8 @@ def page_dashboard():
         st.metric("Paper P&L", "0.0%")
     st.write("Use this page later to show aggregates from your screener and paper trades.")
 
-
 def page_paper_trading():
     st.title("📝 Paper Trading")
-
     # ======================================
     # Portfolio selection - NO AUTO-LOAD
     # ======================================
@@ -1079,7 +1009,6 @@ def page_paper_trading():
                     st.error(f"❌ Failed to load: {e}")
 
         st.stop()
-
     # ======================================
     # Trading UI
     # ======================================
@@ -1188,7 +1117,6 @@ def page_paper_trading():
             st.dataframe(hist_df, use_container_width=True)
         else:
             st.info("📭 **No trades yet**")
-
     # ======================================
     # Export section
     # ======================================
@@ -1216,7 +1144,6 @@ def page_paper_trading():
                 )
     with c2:
         st.info("💡 **Click New Portfolio or upload CSV to switch profiles**")
-
 # ======================================
 # Main app entry
 # ======================================
