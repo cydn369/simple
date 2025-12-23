@@ -988,7 +988,7 @@ def page_screener():
             if st.session_state.get("selected_ticker"):
                 st.markdown("---")
                 st.subheader(f"📉 Chart for {st.session_state['selected_ticker']}")
-                plot_candlestick(st.session_state["selected_ticker"])
+                plotcandlestick(st.session_state["selected_ticker"])
 
 def page_dashboard():
     st.title("📊 Dashboard")
