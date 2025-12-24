@@ -870,7 +870,7 @@ class StreamlitPortfolio:
 def page_historical_analysis():
     st.title("🔍 Historical Analysis")
     
-    # 1. Ticker selection (Nifty500 or custom)
+    # 1. Ticker selection (same as before)
     with st.sidebar:
         st.header("📋 Analysis Setup")
         tickersource = st.radio("Ticker Source:", ["Nifty500 file", "Upload custom"], index=0)
@@ -891,7 +891,7 @@ def page_historical_analysis():
                 currenttickers = []
                 st.stop()
         
-        # 2. Date picker with presets (FIXED: proper datetime handling)
+        # Date picker (for data range)
         col1, col2 = st.columns(2)
         with col1:
             from_preset = st.selectbox("From:", ["1y", "2y", "5y", "10y", "Custom"], index=0)
@@ -900,153 +900,108 @@ def page_historical_analysis():
         
         today = datetime.now().date()
         if from_preset == "Custom":
-            from_date = st.date_input("From Date", value=today - timedelta(days=365), min_value=None)
+            from_date = st.date_input("From Date", value=today - timedelta(days=365))
         else:
             days = {"1y": 365, "2y": 730, "5y": 1825, "10y": 3650}
             default_from = today - timedelta(days=days[from_preset])
-            from_date = st.date_input("From Date", value=default_from, min_value=None)
+            from_date = st.date_input("From Date", value=default_from)
         
         if to_preset == "Custom":
             to_date = st.date_input("To Date", value=today)
         else:
             to_date = today
     
-    # 3. Pattern selection (FIXED: proper filtering)
+    # 2. Pattern selection (EXACTLY like screener)
     st.subheader("🎯 Select Patterns")
-    available_patterns = []
-    for k in INDICATOR_CHECKS.keys():
-        if "RSI" not in k and "MACD" not in k and "VolumeSpike" not in k:
-            available_patterns.append(k)
+    available_patterns = [k for k in INDICATOR_CHECKS.keys() 
+                         if "RSI" not in k and "MACD" not in k and "VolumeSpike" not in k]
     
-    # ✅ SAFE DEFAULT - uses first available pattern (or empty list)
-    default_pattern = available_patterns[0] if available_patterns else None
     selected_patterns = st.multiselect(
         "Choose patterns (ANY match):", 
         options=sorted(available_patterns),
-        default=[default_pattern] if default_pattern else []
+        default=available_patterns[:1] if available_patterns else []
     )
-
-    # 4. Analysis button (FIXED: NO CACHING, proper progress)
-    if st.button("🚀 Start Historical Analysis", type="primary"):
-        if not currenttickers:
-            st.error("❌ No tickers loaded")
-            st.stop()
-        if not selected_patterns:
-            st.error("❌ Select at least one pattern")
-            st.stop()
-        if from_date >= to_date:
-            st.error("❌ From date must be before To date")
-            st.stop()
-        
-        st.info(f"🔄 Analyzing {len(currenttickers)} tickers ({from_date} to {to_date})...")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        results = []
-        analyzed_tickers = min(100, len(currenttickers))  # Limit for speed
-        
-        def analyze_single_ticker(ticker):
-            try:
-                stock = yf.Ticker(ticker)
-                hist = stock.history(start=from_date, end=to_date)
-                if len(hist) < 20:
-                    return []
-                
-                hist = hist.dropna(subset=['Open', 'High', 'Low', 'Close', 'Volume'])
-                if len(hist) < 20:
-                    return []
-                
-                info = stock.info
-                company_name = info.get('longName', ticker)
-                
-                detections = []
-                for i in range(20, len(hist)):
-                    window = hist.iloc[max(0, i-30):i+1]
-                    
-                    for pattern_name in selected_patterns:
-                        pattern_key = pattern_name.lower()
-                        if pattern_key in INDICATOR_CHECKS:
-                            pattern_fn = INDICATOR_CHECKS[pattern_key]
-                            try:
-                                if pattern_fn(window):
-                                    detections.append({
-                                        'Ticker': ticker,
-                                        'Company': company_name,
-                                        'Date': window.index[-1],
-                                        'Pattern': pattern_name.title(),
-                                        'PriorTrend': prior_trend(window['Close'], lookback=14),
-                                        'PriorVolume': prior_volume_trend(window['Volume'], lookback=10)
-                                    })
-                                    break  # One pattern per date
-                            except:
-                                continue
-                return detections
-            except:
-                return []
-        
-        # Sequential processing with progress (fast enough, no threading complexity)
-        for i, ticker in enumerate(currenttickers[:analyzed_tickers]):
-            status_text.text(f"Analyzing {ticker} ({i+1}/{analyzed_tickers})")
-            detections = analyze_single_ticker(ticker)
-            results.extend(detections)
-            progress_bar.progress((i+1) / analyzed_tickers)
-        
-        progress_bar.empty()
-        status_text.empty()
-        
-        if results:
-            df_results = pd.DataFrame(results)
-            if not df_results.empty:
-                st.session_state.historical_results = df_results
-                st.success(f"✅ Found {len(df_results)} pattern occurrences across {analyzed_tickers} tickers!")
-            else:
-                st.warning("⚠️ No patterns detected")
-        else:
-            st.warning("⚠️ No patterns detected")
-
     
-    # 5. Results table (FIXED: proper selection + error handling)
+    # 3. REUSE SCREENER LOGIC - Fetch & Analyze
+    if st.button("🚀 Start Historical Analysis", type="primary"):
+        if not currenttickers or not selected_patterns:
+            st.error("Load tickers and select patterns")
+            st.stop()
+        
+        st.info(f"🔄 Fetching {len(currenttickers)} tickers ({from_date} to {to_date})...")
+        progress = st.progress(0)
+        
+        # ✅ EXACT SAME FUNCTION as your working screener!
+        def _fetch_with_progress(tickers):
+            results = []
+            total = len(tickers)
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                for i, res in enumerate(executor.map(fetch_stock_data, tickers), 1):
+                    if res is not None:
+                        results.append(res)
+                    progress.progress(i / total)
+            return results
+        
+        results = _fetch_with_progress(currenttickers[:50])  # Same limit as screener
+        df = pd.DataFrame(results)
+        
+        if df.empty:
+            st.error("No valid data retrieved")
+        else:
+            st.success(f"✅ Analyzed {len(df)} stocks")
+            st.session_state.historical_results = df
+    
+    # 4. Results table (KEEP SAME - works perfectly)
     if 'historical_results' in st.session_state:
         df = st.session_state.historical_results.copy()
         
-        if df.empty:
-            st.warning("No historical results available")
+        # ✅ Filter by SELECTED PATTERNS (exactly like screener)
+        if selected_patterns:
+            mask = df[selected_patterns].any(axis=1)
+            filtered_df = df[mask].copy()
+            st.caption(f"Filtered by {len(selected_patterns)} pattern(s)")
         else:
-            # Clean and sort data
-            df['Date'] = pd.to_datetime(df['Date']).dt.date
-            df = df.sort_values('Date', ascending=False)
+            filtered_df = df.copy()
+            st.caption("Showing all analyzed stocks")
+        
+        if filtered_df.empty:
+            st.warning("No stocks match selected patterns")
+        else:
+            # ✅ Add Date column from latest data
+            filtered_df['Date'] = pd.to_datetime(filtered_df.index).dt.date
+            filtered_df['Company'] = filtered_df.get('Company', filtered_df['Ticker'])
             
-            st.subheader(f"📋 Pattern Occurrences ({len(df)} found)")
+            # Sort by date (newest first)
+            filtered_df = filtered_df.sort_values('Date', ascending=False)
             
-            # Clickable table
+            st.subheader(f"📋 Pattern Occurrences ({len(filtered_df)} found)")
+            
             selected_rows = st.dataframe(
-                df[['Ticker', 'Company', 'Date', 'Pattern', 'PriorTrend', 'PriorVolume']],
+                filtered_df[['Ticker', 'Company', 'Date'] + selected_patterns + ['PriorTrend', 'PriorVolume']],
                 use_container_width=True,
                 height=500,
                 selection_mode="single-row",
                 hide_index=True
             )
             
-            # 6. Chart + metrics for selected row (FIXED: robust handling)
+            # 5. Chart for selected row (same as before)
             if selected_rows is not None and len(selected_rows) > 0:
                 try:
                     selected_idx = selected_rows.index[0]
-                    selected_data = df.iloc[selected_idx]
+                    selected_data = filtered_df.iloc[selected_idx]
                     
                     ticker = selected_data['Ticker']
                     pattern_date = selected_data['Date']
-                    pattern_name = selected_data['Pattern']
+                    
+                    # Show which patterns matched
+                    matched_patterns = [col for col in selected_patterns if selected_data[col]]
+                    pattern_name = ", ".join(matched_patterns) if matched_patterns else "Multiple"
                     
                     st.markdown("---")
                     st.subheader(f"📊 {ticker}: **{pattern_name}** on {pattern_date}")
                     
-                    # Safe chart plotting
-                    if callable(plotcandlestick):
-                        plotcandlestick(ticker, arounddate=pattern_date)
-                    else:
-                        st.error("plotcandlestick function not available")
+                    plotcandlestick(ticker, arounddate=pattern_date)
                     
-                    # Metrics
                     col1, col2 = st.columns(2)
                     with col1:
                         st.metric("📈 Prior Price Trend", selected_data['PriorTrend'])
@@ -1054,11 +1009,11 @@ def page_historical_analysis():
                         st.metric("📊 Prior Volume Trend", selected_data['PriorVolume'])
                         
                 except Exception as e:
-                    st.error(f"Error displaying selection: {e}")
-            else:
-                st.info("👆 Click a row above to view chart & details")
+                    st.error(f"Error displaying chart: {e}")
+    
     else:
-        st.info("👆 Setup tickers → patterns → **Start Historical Analysis**")
+        st.info("👆 Setup → **Start Historical Analysis** → Click row to view chart")
+
 
 
 
