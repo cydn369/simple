@@ -592,6 +592,123 @@ INDICATOR_CHECKS = {
     "DebtEquity_Lt_1": lambda hist, info: debt_equity_lt_1(info),
 }
 # ======================================
+# Coloumn Shading
+# ======================================
+
+def apply_screener_coloring(df):
+    """
+    Complete bullish (green)/bearish (red) color coding for screener table
+    """
+    # All screener columns from fetchstockdata function [file:1]
+    base_cols = ['Ticker', 'Company', 'Price', 'Market Cap B', 'PE Ratio', 'Dividend Yield', 'Beta', 'Sector']
+    
+    # Price/Volume trends (text-based)
+    trend_cols = ['PriceTrend', 'VolumeTrend']
+    
+    # Numeric columns for gradient coloring
+    numeric_cols = ['Price', 'Market Cap B', 'PE Ratio', 'Dividend Yield', 'Beta', 'RSI']
+    
+    # Bullish pattern columns (green when True)
+    bullish_patterns = [
+        'BullishMarubozu', 'Hammer', 'InvertedHammer', 'BullishEngulfing', 'MorningStar',
+        'PiercingLine', 'RisingThreeMethods', 'ThreeInsideUp', 'BullishTasukiGap',
+        'MatHold', 'ThreeWhiteSoldiers', 'RisingWindow', 'BullishSeparatingLines'
+    ]
+    
+    # Bearish pattern columns (red when True)
+    bearish_patterns = [
+        'BearishMarubozu', 'BearishEngulfing', 'EveningStar', 'DarkCloudCover',
+        'ThreeInsideDown', 'BearishTasukiGap', 'ThreeBlackCrows', 'FallingWindow',
+        'BearishSeparatingLines', 'UpsideGapTwoCrows', 'OnNeck', 'InNeck'
+    ]
+    
+    # Technical indicators (bullish green, bearish red)
+    bullish_tech = ['RSIOversold', 'MACDBullish', 'GoldenCross', 'BollingerBreakout', 'VolumeSpike']
+    bearish_tech = ['RSIOverbought', 'MACDBearish', 'DeathCross', 'BollingerBreakdown']
+    
+    # Financial filters (green when condition met)
+    financial_green = ['PELt20', 'DividendYieldGt2', 'DebtEquityLt1']
+    
+    def color_bullish_patterns(val):
+        """Green background for True bullish signals"""
+        if pd.isna(val) or val == 'NA' or val == False:
+            return ''
+        return 'background-color: #28a745; color: white; font-weight: bold'
+    
+    def color_bearish_patterns(val):
+        """Red background for True bearish signals"""
+        if pd.isna(val) or val == 'NA' or val == False:
+            return ''
+        return 'background-color: #dc3545; color: white; font-weight: bold'
+    
+    def color_trends(val):
+        """Green for Up/Increasing, Red for Down/Decreasing"""
+        if pd.isna(val) or val == 'NA':
+            return ''
+        val_str = str(val).lower()
+        if 'up' in val_str or 'increasing' in val_str:
+            return 'background-color: #28a745; color: white'
+        elif 'down' in val_str or 'decreasing' in val_str:
+            return 'background-color: #dc3545; color: white'
+        return ''
+    
+    def color_numerics(val):
+        """Gradient coloring for numbers"""
+        if pd.isna(val) or val == 'NA':
+            return ''
+        try:
+            num = float(str(val))
+            if 'RSI' in str(df.columns[df.columns.get_loc(val.name)] if hasattr(val, 'name') else ''):
+                # RSI: Green <30, Red >70
+                if num < 30:
+                    return f'background-color: rgba(40, 167, 69, {min((30-num)/30, 1.0)}); color: white'
+                elif num > 70:
+                    return f'background-color: rgba(220, 53, 69, {min((num-70)/30, 1.0)}); color: white'
+            elif num > 0:
+                return f'background-color: rgba(40, 167, 69, 0.3)'
+            elif num < 0:
+                return f'background-color: rgba(220, 53, 69, 0.3); color: white'
+        except:
+            pass
+        return ''
+    
+    # Apply styling to all relevant columns
+    styled = df.style
+    
+    # 1. Pattern columns (True = colored)
+    pattern_cols = [col for col in bullish_patterns + bearish_patterns if col in df.columns]
+    if pattern_cols:
+        styled = styled.applymap(color_bullish_patterns, subset=pd.IndexSlice[bullish_patterns])
+        styled = styled.applymap(color_bearish_patterns, subset=pd.IndexSlice[bearish_patterns])
+    
+    # 2. Trend columns
+    trend_cols_in_df = [col for col in trend_cols if col in df.columns]
+    if trend_cols_in_df:
+        styled = styled.applymap(color_trends, subset=pd.IndexSlice[trend_cols_in_df])
+    
+    # 3. Numeric gradient columns
+    num_cols_in_df = [col for col in numeric_cols if col in df.columns]
+    if num_cols_in_df:
+        styled = styled.applymap(color_numerics, subset=pd.IndexSlice[num_cols_in_df])
+    
+    # 4. Financial green columns
+    finance_cols = [col for col in financial_green if col in df.columns]
+    if finance_cols:
+        styled = styled.applymap(color_bullish_patterns, subset=pd.IndexSlice[finance_cols])
+    
+    # Formatting
+    styled = styled.format({
+        'Price': '{:.2f}',
+        'Market Cap B': '{:.1f}',
+        'PE Ratio': '{:.1f}',
+        'Dividend Yield': '{:.2f}%',
+        'Beta': '{:.2f}',
+        'RSI': '{:.1f}'
+    })
+    
+    return styled
+
+# ======================================
 # Data fetch and ticker parsing
 # ======================================
 @st.cache_data
@@ -959,7 +1076,8 @@ def page_screener():
             st.warning("No stocks match the current screening conditions.")
         else:
             st.write(f"Found **{len(filtered_df)}** matching stocks.")
-            st.dataframe(filtered_df, use_container_width=True, height=400)
+            sstyled_table = apply_screener_coloring(filtereddf)
+            st.dataframe(styled_table, use_container_width=True, height=400)
 
             tickers_in_result = filtered_df["Ticker"].tolist()
             selected_symbol = st.selectbox(
