@@ -951,11 +951,11 @@ def page_historical_analysis():
             st.success(f"✅ Analyzed {len(df)} stocks")
             st.session_state.historical_results = df
     
-    # 4. Results table (KEEP SAME - works perfectly)
+   # 4. Results table (FIXED date handling)
     if 'historical_results' in st.session_state:
         df = st.session_state.historical_results.copy()
         
-        # ✅ Filter by SELECTED PATTERNS (exactly like screener)
+        # Filter by SELECTED PATTERNS
         if selected_patterns:
             mask = df[selected_patterns].any(axis=1)
             filtered_df = df[mask].copy()
@@ -967,49 +967,68 @@ def page_historical_analysis():
         if filtered_df.empty:
             st.warning("No stocks match selected patterns")
         else:
-            # ✅ Add Date column from latest data
-            filtered_df['Date'] = pd.to_datetime(filtered_df.index).dt.date
-            filtered_df['Company'] = filtered_df.get('Company', filtered_df['Ticker'])
+            # ✅ FIXED: Proper date extraction from screener data
+            try:
+                # Case 1: Index is DatetimeIndex (most common)
+                if isinstance(filtered_df.index, pd.DatetimeIndex):
+                    filtered_df['Date'] = filtered_df.index.date
+                # Case 2: Has 'Date' column already
+                elif 'Date' in filtered_df.columns:
+                    filtered_df['Date'] = pd.to_datetime(filtered_df['Date']).dt.date
+                # Case 3: Reset index and use first date
+                else:
+                    filtered_df = filtered_df.reset_index()
+                    if 'Date' in filtered_df.columns:
+                        filtered_df['Date'] = pd.to_datetime(filtered_df['Date']).dt.date
+                    else:
+                        filtered_df['Date'] = datetime.now().date()
+                
+                filtered_df['Company'] = filtered_df.get('Company', filtered_df['Ticker'])
+                
+                # Sort by date
+                filtered_df = filtered_df.sort_values('Date', ascending=False)
+                
+                st.subheader(f"📋 Pattern Occurrences ({len(filtered_df)} found)")
+                
+                # Show relevant columns only
+                display_cols = ['Ticker', 'Company', 'Date', 'PriorTrend', 'PriorVolume']
+                pattern_cols = [col for col in selected_patterns if col in filtered_df.columns]
+                display_cols = display_cols[:3] + pattern_cols + display_cols[3:]
+                
+                selected_rows = st.dataframe(
+                    filtered_df[display_cols],
+                    use_container_width=True,
+                    height=500,
+                    selection_mode="single-row",
+                    hide_index=True
+                )
             
-            # Sort by date (newest first)
-            filtered_df = filtered_df.sort_values('Date', ascending=False)
+    # 5. Chart for selected row (same as before)
+    if selected_rows is not None and len(selected_rows) > 0:
+        try:
+            selected_idx = selected_rows.index[0]
+            selected_data = filtered_df.iloc[selected_idx]
             
-            st.subheader(f"📋 Pattern Occurrences ({len(filtered_df)} found)")
+            ticker = selected_data['Ticker']
+            pattern_date = selected_data['Date']
             
-            selected_rows = st.dataframe(
-                filtered_df[['Ticker', 'Company', 'Date'] + selected_patterns + ['PriorTrend', 'PriorVolume']],
-                use_container_width=True,
-                height=500,
-                selection_mode="single-row",
-                hide_index=True
-            )
+            # Show which patterns matched
+            matched_patterns = [col for col in selected_patterns if selected_data[col]]
+            pattern_name = ", ".join(matched_patterns) if matched_patterns else "Multiple"
             
-            # 5. Chart for selected row (same as before)
-            if selected_rows is not None and len(selected_rows) > 0:
-                try:
-                    selected_idx = selected_rows.index[0]
-                    selected_data = filtered_df.iloc[selected_idx]
-                    
-                    ticker = selected_data['Ticker']
-                    pattern_date = selected_data['Date']
-                    
-                    # Show which patterns matched
-                    matched_patterns = [col for col in selected_patterns if selected_data[col]]
-                    pattern_name = ", ".join(matched_patterns) if matched_patterns else "Multiple"
-                    
-                    st.markdown("---")
-                    st.subheader(f"📊 {ticker}: **{pattern_name}** on {pattern_date}")
-                    
-                    plotcandlestick(ticker, arounddate=pattern_date)
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("📈 Prior Price Trend", selected_data['PriorTrend'])
-                    with col2:
-                        st.metric("📊 Prior Volume Trend", selected_data['PriorVolume'])
-                        
-                except Exception as e:
-                    st.error(f"Error displaying chart: {e}")
+            st.markdown("---")
+            st.subheader(f"📊 {ticker}: **{pattern_name}** on {pattern_date}")
+            
+            plotcandlestick(ticker, arounddate=pattern_date)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("📈 Prior Price Trend", selected_data['PriorTrend'])
+            with col2:
+                st.metric("📊 Prior Volume Trend", selected_data['PriorVolume'])
+                
+        except Exception as e:
+            st.error(f"Error displaying chart: {e}")
     
     else:
         st.info("👆 Setup → **Start Historical Analysis** → Click row to view chart")
