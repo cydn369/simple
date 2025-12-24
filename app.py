@@ -633,13 +633,13 @@ def apply_screener_coloring(df):
         """Green background for True bullish signals"""
         if pd.isna(val) or val == 'NA' or val == False:
             return ''
-        return 'background-color: #28a745; color: white; font-weight: bold'
+        return 'background-color: white; color: #28a745; font-weight: bold'
     
     def color_bearish_patterns(val):
         """Red background for True bearish signals"""
         if pd.isna(val) or val == 'NA' or val == False:
             return ''
-        return 'background-color: #dc3545; color: white; font-weight: bold'
+        return 'background-color: white; color: #dc3545; font-weight: bold'
     
     def color_trends(val):
         """Green for Up/Increasing, Red for Down/Decreasing"""
