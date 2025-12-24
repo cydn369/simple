@@ -918,10 +918,12 @@ def page_historical_analysis():
         if "RSI" not in k and "MACD" not in k and "VolumeSpike" not in k:
             available_patterns.append(k)
     
+    # ✅ SAFE DEFAULT - uses first available pattern (or empty list)
+    default_pattern = available_patterns[0] if available_patterns else None
     selected_patterns = st.multiselect(
         "Choose patterns (ANY match):", 
         options=sorted(available_patterns),
-        default=["doji"]  # lowercase to match function names
+        default=[default_pattern] if default_pattern else []
     )
     
     # 4. Analysis button (FIXED: proper validation + progress)
