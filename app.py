@@ -950,10 +950,21 @@ def page_historical_analysis():
             st.session_state.historical_results = df
             st.success(f"✅ Analyzed {len(df)} stocks")
     
-    # 4. Results table + Chart (SIMPLIFIED, NO INDENT ERRORS)
+    # 4. Results table + Chart (FIXED: adds PriorTrend/PriorVolume)
     if 'historical_results' in st.session_state:
         df = st.session_state.historical_results.copy()
         
+        # ✅ ADD PriorTrend and PriorVolume columns (missing from fetch_stock_data)
+        for idx, row in df.iterrows():
+            ticker_hist = row.get('history', pd.DataFrame())  # Get history from screener data
+            if len(ticker_hist) > 14:
+                df.at[idx, 'PriorTrend'] = prior_trend(ticker_hist['Close'], lookback=14)
+                df.at[idx, 'PriorVolume'] = prior_volume_trend(ticker_hist['Volume'], lookback=10)
+            else:
+                df.at[idx, 'PriorTrend'] = "N/A"
+                df.at[idx, 'PriorVolume'] = "N/A"
+        
+        # Filter by patterns
         if selected_patterns:
             mask = df[selected_patterns].any(axis=1)
             filtered_df = df[mask].copy()
@@ -963,20 +974,23 @@ def page_historical_analysis():
         if filtered_df.empty:
             st.warning("No stocks match selected patterns")
         else:
-            # Simple date handling
-            filtered_df = filtered_df.reset_index()
-            filtered_df['Date'] = pd.to_datetime(filtered_df['Date']).dt.date if 'Date' in filtered_df.columns else datetime.now().date()
+            # Date handling
+            filtered_df = filtered_df.reset_index(drop=True)
+            filtered_df['Date'] = datetime.now().date()  # Use latest date
             filtered_df['Company'] = filtered_df.get('Company', filtered_df['Ticker'])
-            filtered_df = filtered_df.sort_values('Date', ascending=False)
             
             st.subheader(f"📋 Pattern Occurrences ({len(filtered_df)} found)")
             
-            display_cols = ['Ticker', 'Company', 'Date', 'PriorTrend', 'PriorVolume']
+            # Safe column selection
+            display_cols = ['Ticker', 'Company', 'Date']
             pattern_cols = [col for col in selected_patterns if col in filtered_df.columns]
-            display_cols = ['Ticker', 'Company', 'Date'] + pattern_cols + ['PriorTrend', 'PriorVolume']
+            trend_cols = ['PriorTrend', 'PriorVolume']
+            final_cols = display_cols + pattern_cols + trend_cols
             
+            # Only show columns that exist
+            available_cols = [col for col in final_cols if col in filtered_df.columns]
             selected_rows = st.dataframe(
-                filtered_df[display_cols],
+                filtered_df[available_cols],
                 use_container_width=True,
                 height=500,
                 selection_mode="single-row",
@@ -1000,14 +1014,13 @@ def page_historical_analysis():
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("📈 Prior Price Trend", selected_data['PriorTrend'])
+                    st.metric("📈 Prior Price Trend", selected_data.get('PriorTrend', 'N/A'))
                 with col2:
-                    st.metric("📊 Prior Volume Trend", selected_data['PriorVolume'])
+                    st.metric("📊 Prior Volume Trend", selected_data.get('PriorVolume', 'N/A'))
     else:
         st.info("👆 Setup → **Start Historical Analysis** → Click row")
 
-
-            
+           
 
 def page_screener():
     st.title("📈 Road to Runway")
