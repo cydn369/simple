@@ -1076,7 +1076,7 @@ def page_screener():
             st.warning("No stocks match the current screening conditions.")
         else:
             st.write(f"Found **{len(filtered_df)}** matching stocks.")
-            sstyled_table = apply_screener_coloring(filtereddf)
+            sstyled_table = apply_screener_coloring(filtered_df)
             st.dataframe(styled_table, use_container_width=True, height=400)
 
             tickers_in_result = filtered_df["Ticker"].tolist()
