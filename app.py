@@ -959,7 +959,7 @@ def page_screener():
             st.warning("No stocks match the current screening conditions.")
         else:
             st.write(f"Found **{len(filtered_df)}** matching stocks.")
-            st.dataframe(filtered_df, use_container_width=True, height=400,  column_config={"Ticker": st.column_config.Column("Ticker", frozen=True)})
+            st.dataframe(filtered_df, use_container_width=True, height=400)
 
             tickers_in_result = filtered_df["Ticker"].tolist()
             selected_symbol = st.selectbox(
