@@ -867,165 +867,6 @@ class StreamlitPortfolio:
 # ======================================
 # Pages
 # ======================================
-def page_historical_analysis():
-    st.title("🔍 Historical Analysis")
-    
-    # 1. Ticker/Date setup (sidebar)
-    with st.sidebar:
-        st.header("📋 Analysis Setup")
-        tickersource = st.radio("Ticker Source:", ["Nifty500 file", "Upload custom"], index=0)
-        
-        if tickersource == "Nifty500 file":
-            currenttickers = load_tickers_from_file("Nifty500.txt")
-            if currenttickers:
-                st.info(f"Using {len(currenttickers)} Nifty500 tickers")
-            else:
-                st.warning("nifty500.txt not found")
-                st.stop()
-        else:
-            uploadedfile = st.file_uploader("Upload tickers (CSV/TXT)", type=["csv", "txt"])
-            if uploadedfile:
-                currenttickers = parsetickerfile(uploadedfile)
-                st.success(f"Loaded {len(currenttickers)} tickers")
-            else:
-                currenttickers = []
-                st.stop()
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            from_preset = st.selectbox("From:", ["1y", "2y", "5y", "10y", "Custom"], index=0)
-        with col2:
-            to_preset = st.selectbox("To:", ["Today", "Custom"], index=0)
-        
-        today = datetime.now().date()
-        if from_preset == "Custom":
-            from_date = st.date_input("From Date", value=today - timedelta(days=365))
-        else:
-            days = {"1y": 365, "2y": 730, "5y": 1825, "10y": 3650}
-            default_from = today - timedelta(days=days[from_preset])
-            from_date = st.date_input("From Date", value=default_from)
-        
-        if to_preset == "Custom":
-            to_date = st.date_input("To Date", value=today)
-        else:
-            to_date = today
-    
-    # 2. Pattern selection
-    st.subheader("🎯 Select Patterns")
-    available_patterns = [k for k in INDICATOR_CHECKS.keys() 
-                         if "RSI" not in k and "MACD" not in k and "VolumeSpike" not in k]
-    
-    selected_patterns = st.multiselect(
-        "Choose patterns (ANY match):", 
-        options=sorted(available_patterns),
-        default=available_patterns[:1] if available_patterns else []
-    )
-    
-    # 3. HISTORICAL SCAN (CORRECT LOGIC)
-    if st.button("🚀 Start Historical Analysis", type="primary"):
-        if not currenttickers or not selected_patterns:
-            st.error("Load tickers and select patterns")
-            st.stop()
-        
-        st.info(f"🔄 Scanning {len(currenttickers)} tickers from {from_date} to {to_date}...")
-        progress = st.progress(0)
-        status_text = st.empty()
-        
-        all_occurrences = []
-        
-        def scan_ticker_history(ticker):
-            try:
-                stock = yf.Ticker(ticker)
-                hist = stock.history(start=from_date, end=to_date)
-                if len(hist) < 20:
-                    return []
-                
-                hist = hist.dropna(subset=['Open', 'High', 'Low', 'Close', 'Volume'])
-                if len(hist) < 20:
-                    return []
-                
-                info = stock.info
-                company_name = info.get('longName', ticker)
-                
-                occurrences = []
-                for i in range(20, len(hist)):
-                    window = hist.iloc[max(0, i-50):i+1]  # 50-day window
-                    date = hist.index[i].date()
-                    
-                    # Check each selected pattern
-                    for pattern_name in selected_patterns:
-                        if pattern_name in INDICATOR_CHECKS:
-                            pattern_fn = INDICATOR_CHECKS[pattern_name]
-                            if pattern_fn(window):
-                                occurrences.append({
-                                    'Ticker': ticker,
-                                    'Company': company_name,
-                                    'Date': date,
-                                    'Pattern': pattern_name,
-                                    'PriorTrend': prior_trend(hist['Close'].iloc[:i+1], lookback=14),
-                                    'PriorVolume': prior_volume_trend(hist['Volume'].iloc[:i+1], lookback=10)
-                                })
-                                break  # One pattern per date
-                return occurrences
-            except:
-                return []
-        
-        # Process tickers
-        for i, ticker in enumerate(currenttickers[:50]):  # Limit 50
-            status_text.text(f"Scanning {ticker} ({i+1}/50)")
-            occurrences = scan_ticker_history(ticker)
-            all_occurrences.extend(occurrences)
-            progress.progress((i+1) / 50)
-        
-        status_text.empty()
-        
-        if all_occurrences:
-            df_results = pd.DataFrame(all_occurrences)
-            st.session_state.historical_results = df_results
-            st.success(f"✅ Found {len(df_results)} pattern occurrences!")
-        else:
-            st.warning("⚠️ No pattern occurrences found")
-    
-    # 4. Results table (FIXED selection_mode)
-    if 'historical_results' in st.session_state:
-        df = st.session_state.historical_results
-        
-        if df.empty:
-            st.warning("No historical results")
-        else:
-            df = df.sort_values('Date', ascending=False)
-            
-            st.subheader(f"📋 Pattern Occurrences ({len(df)} found)")
-            
-            # ✅ FIXED: Use column selection, not dataframe selection
-            selected_idx = st.selectbox(
-                "Select occurrence:",
-                options=range(len(df)),
-                format_func=lambda i: f"{df.iloc[i]['Ticker']} - {df.iloc[i]['Pattern']} ({df.iloc[i]['Date']})"
-            )
-            
-            if selected_idx is not None:
-                selected_data = df.iloc[selected_idx]
-                
-                ticker = selected_data['Ticker']
-                pattern_date = selected_data['Date']
-                pattern_name = selected_data['Pattern']
-                
-                st.markdown("---")
-                st.subheader(f"📊 {ticker}: **{pattern_name}** on {pattern_date}")
-                
-                if callable(plotcandlestick):
-                    plotcandlestick(ticker, arounddate=pattern_date)
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("📈 Prior Price Trend", selected_data['PriorTrend'])
-                with col2:
-                    st.metric("📊 Prior Volume Trend", selected_data['PriorVolume'])
-    else:
-        st.info("👆 Setup → **Start Historical Analysis** → Select occurrence")
-          
-
 def page_screener():
     st.title("📈 Road to Runway")
 
@@ -1336,7 +1177,7 @@ def page_paper_trading():
 
 st.set_page_config(page_title="Road to Runway", layout="wide")
 
-page = st.sidebar.selectbox("Select page:", ["Dashboard", "Screener", "Paper Trading", "Historical Analysis"])
+page = st.sidebar.selectbox("Select page:", ["Dashboard", "Screener", "Paper Trading"])
 
 if page == "Screener":
     page_screener()
@@ -1344,6 +1185,3 @@ elif page == "Dashboard":
     page_dashboard()
 elif page == "Paper Trading":
     page_paper_trading()
-elif page == "Historical Analysis":
-    page_historical_analysis()  # Add this
-
