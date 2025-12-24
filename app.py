@@ -925,8 +925,8 @@ def page_historical_analysis():
         options=sorted(available_patterns),
         default=[default_pattern] if default_pattern else []
     )
-    
-    # 4. Analysis button (FIXED: proper validation + progress)
+
+    # 4. Analysis button (FIXED: NO CACHING, proper progress)
     if st.button("🚀 Start Historical Analysis", type="primary"):
         if not currenttickers:
             st.error("❌ No tickers loaded")
@@ -939,70 +939,71 @@ def page_historical_analysis():
             st.stop()
         
         st.info(f"🔄 Analyzing {len(currenttickers)} tickers ({from_date} to {to_date})...")
-        progress = st.progress(0)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         
-        @st.cache_data(ttl=3600)  # Cache results for 1 hour
-        def cached_analysis(_tickers, _from, _to, _patterns):
-            results = []
-            
-            def analyze_single_ticker(ticker):
-                try:
-                    stock = yf.Ticker(ticker)
-                    hist = stock.history(start=_from, end=_to)
-                    if len(hist) < 20:  # Need minimum data
-                        return []
-                    
-                    hist = hist.dropna(subset=['Open', 'High', 'Low', 'Close', 'Volume'])
-                    if len(hist) < 20:
-                        return []
-                    
-                    info = stock.info
-                    company_name = info.get('longName', ticker)
-                    
-                    detections = []
-                    for i in range(20, len(hist)):  # Start after warmup
-                        window = hist.iloc[max(0, i-30):i+1]  # 30-day rolling window
-                        
-                        for pattern_name in _patterns:
-                            if pattern_name.lower() in INDICATOR_CHECKS:
-                                pattern_fn = INDICATOR_CHECKS[pattern_name.lower()]
-                                try:
-                                    if pattern_fn(window):
-                                        detections.append({
-                                            'Ticker': ticker,
-                                            'Company': company_name,
-                                            'Date': window.index[-1],
-                                            'Pattern': pattern_name.title(),
-                                            'PriorTrend': prior_trend(window['Close'], lookback=14),
-                                            'PriorVolume': prior_volume_trend(window['Volume'], lookback=10)
-                                        })
-                                        break  # One pattern per date max
-                                except:
-                                    continue  # Skip pattern errors
-                    return detections
-                except Exception:
+        results = []
+        analyzed_tickers = min(100, len(currenttickers))  # Limit for speed
+        
+        def analyze_single_ticker(ticker):
+            try:
+                stock = yf.Ticker(ticker)
+                hist = stock.history(start=from_date, end=to_date)
+                if len(hist) < 20:
                     return []
-            
-            # Process with threading
-            with ThreadPoolExecutor(max_workers=15) as executor:
-                futures = [executor.submit(analyze_single_ticker, ticker) for ticker in _tickers[:100]]
-                for i, future in enumerate(as_completed(futures)):
-                    results.extend(future.result())
-                    progress.progress((i+1) / len(futures))
-            
-            return results
+                
+                hist = hist.dropna(subset=['Open', 'High', 'Low', 'Close', 'Volume'])
+                if len(hist) < 20:
+                    return []
+                
+                info = stock.info
+                company_name = info.get('longName', ticker)
+                
+                detections = []
+                for i in range(20, len(hist)):
+                    window = hist.iloc[max(0, i-30):i+1]
+                    
+                    for pattern_name in selected_patterns:
+                        pattern_key = pattern_name.lower()
+                        if pattern_key in INDICATOR_CHECKS:
+                            pattern_fn = INDICATOR_CHECKS[pattern_key]
+                            try:
+                                if pattern_fn(window):
+                                    detections.append({
+                                        'Ticker': ticker,
+                                        'Company': company_name,
+                                        'Date': window.index[-1],
+                                        'Pattern': pattern_name.title(),
+                                        'PriorTrend': prior_trend(window['Close'], lookback=14),
+                                        'PriorVolume': prior_volume_trend(window['Volume'], lookback=10)
+                                    })
+                                    break  # One pattern per date
+                            except:
+                                continue
+                return detections
+            except:
+                return []
         
-        results = cached_analysis(tuple(currenttickers), from_date, to_date, selected_patterns)
+        # Sequential processing with progress (fast enough, no threading complexity)
+        for i, ticker in enumerate(currenttickers[:analyzed_tickers]):
+            status_text.text(f"Analyzing {ticker} ({i+1}/{analyzed_tickers})")
+            detections = analyze_single_ticker(ticker)
+            results.extend(detections)
+            progress_bar.progress((i+1) / analyzed_tickers)
+        
+        progress_bar.empty()
+        status_text.empty()
         
         if results:
             df_results = pd.DataFrame(results)
             if not df_results.empty:
                 st.session_state.historical_results = df_results
-                st.success(f"✅ Found {len(df_results)} pattern occurrences!")
+                st.success(f"✅ Found {len(df_results)} pattern occurrences across {analyzed_tickers} tickers!")
             else:
                 st.warning("⚠️ No patterns detected")
         else:
             st.warning("⚠️ No patterns detected")
+
     
     # 5. Results table (FIXED: proper selection + error handling)
     if 'historical_results' in st.session_state:
