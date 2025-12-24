@@ -870,7 +870,7 @@ class StreamlitPortfolio:
 def page_historical_analysis():
     st.title("🔍 Historical Analysis")
     
-    # 1. Ticker selection
+    # 1. Ticker/Date setup (sidebar)
     with st.sidebar:
         st.header("📋 Analysis Setup")
         tickersource = st.radio("Ticker Source:", ["Nifty500 file", "Upload custom"], index=0)
@@ -891,7 +891,6 @@ def page_historical_analysis():
                 currenttickers = []
                 st.stop()
         
-        # Date picker
         col1, col2 = st.columns(2)
         with col1:
             from_preset = st.selectbox("From:", ["1y", "2y", "5y", "10y", "Custom"], index=0)
@@ -922,89 +921,95 @@ def page_historical_analysis():
         default=available_patterns[:1] if available_patterns else []
     )
     
-    # 3. REUSE SCREENER LOGIC
+    # 3. HISTORICAL SCAN (CORRECT LOGIC)
     if st.button("🚀 Start Historical Analysis", type="primary"):
         if not currenttickers or not selected_patterns:
             st.error("Load tickers and select patterns")
             st.stop()
         
-        st.info(f"🔄 Fetching {len(currenttickers)} tickers...")
+        st.info(f"🔄 Scanning {len(currenttickers)} tickers from {from_date} to {to_date}...")
         progress = st.progress(0)
+        status_text = st.empty()
         
-        def _fetch_with_progress(tickers):
-            results = []
-            total = len(tickers)
-            with ThreadPoolExecutor(max_workers=20) as executor:
-                for i, res in enumerate(executor.map(fetch_stock_data, tickers), 1):
-                    if res is not None:
-                        results.append(res)
-                    progress.progress(i / total)
-            return results
+        all_occurrences = []
         
-        results = _fetch_with_progress(currenttickers[:50])
-        df = pd.DataFrame(results)
+        def scan_ticker_history(ticker):
+            try:
+                stock = yf.Ticker(ticker)
+                hist = stock.history(start=from_date, end=to_date)
+                if len(hist) < 20:
+                    return []
+                
+                hist = hist.dropna(subset=['Open', 'High', 'Low', 'Close', 'Volume'])
+                if len(hist) < 20:
+                    return []
+                
+                info = stock.info
+                company_name = info.get('longName', ticker)
+                
+                occurrences = []
+                for i in range(20, len(hist)):
+                    window = hist.iloc[max(0, i-50):i+1]  # 50-day window
+                    date = hist.index[i].date()
+                    
+                    # Check each selected pattern
+                    for pattern_name in selected_patterns:
+                        if pattern_name in INDICATOR_CHECKS:
+                            pattern_fn = INDICATOR_CHECKS[pattern_name]
+                            if pattern_fn(window):
+                                occurrences.append({
+                                    'Ticker': ticker,
+                                    'Company': company_name,
+                                    'Date': date,
+                                    'Pattern': pattern_name,
+                                    'PriorTrend': prior_trend(hist['Close'].iloc[:i+1], lookback=14),
+                                    'PriorVolume': prior_volume_trend(hist['Volume'].iloc[:i+1], lookback=10)
+                                })
+                                break  # One pattern per date
+                return occurrences
+            except:
+                return []
+        
+        # Process tickers
+        for i, ticker in enumerate(currenttickers[:50]):  # Limit 50
+            status_text.text(f"Scanning {ticker} ({i+1}/50)")
+            occurrences = scan_ticker_history(ticker)
+            all_occurrences.extend(occurrences)
+            progress.progress((i+1) / 50)
+        
+        status_text.empty()
+        
+        if all_occurrences:
+            df_results = pd.DataFrame(all_occurrences)
+            st.session_state.historical_results = df_results
+            st.success(f"✅ Found {len(df_results)} pattern occurrences!")
+        else:
+            st.warning("⚠️ No pattern occurrences found")
+    
+    # 4. Results table (FIXED selection_mode)
+    if 'historical_results' in st.session_state:
+        df = st.session_state.historical_results
         
         if df.empty:
-            st.error("No valid data retrieved")
+            st.warning("No historical results")
         else:
-            st.session_state.historical_results = df
-            st.success(f"✅ Analyzed {len(df)} stocks")
-    
-    # 4. Results table + Chart (FIXED: adds PriorTrend/PriorVolume)
-    if 'historical_results' in st.session_state:
-        df = st.session_state.historical_results.copy()
-        
-        # ✅ ADD PriorTrend and PriorVolume columns (missing from fetch_stock_data)
-        for idx, row in df.iterrows():
-            ticker_hist = row.get('history', pd.DataFrame())  # Get history from screener data
-            if len(ticker_hist) > 14:
-                df.at[idx, 'PriorTrend'] = prior_trend(ticker_hist['Close'], lookback=14)
-                df.at[idx, 'PriorVolume'] = prior_volume_trend(ticker_hist['Volume'], lookback=10)
-            else:
-                df.at[idx, 'PriorTrend'] = "N/A"
-                df.at[idx, 'PriorVolume'] = "N/A"
-        
-        # Filter by patterns
-        if selected_patterns:
-            mask = df[selected_patterns].any(axis=1)
-            filtered_df = df[mask].copy()
-        else:
-            filtered_df = df.copy()
-        
-        if filtered_df.empty:
-            st.warning("No stocks match selected patterns")
-        else:
-            # Date handling
-            filtered_df = filtered_df.reset_index(drop=True)
-            filtered_df['Date'] = datetime.now().date()  # Use latest date
-            filtered_df['Company'] = filtered_df.get('Company', filtered_df['Ticker'])
+            df = df.sort_values('Date', ascending=False)
             
-            st.subheader(f"📋 Pattern Occurrences ({len(filtered_df)} found)")
+            st.subheader(f"📋 Pattern Occurrences ({len(df)} found)")
             
-            # Safe column selection
-            display_cols = ['Ticker', 'Company', 'Date']
-            pattern_cols = [col for col in selected_patterns if col in filtered_df.columns]
-            trend_cols = ['PriorTrend', 'PriorVolume']
-            final_cols = display_cols + pattern_cols + trend_cols
-            
-            # Only show columns that exist
-            available_cols = [col for col in final_cols if col in filtered_df.columns]
-            selected_rows = st.dataframe(
-                filtered_df[available_cols],
-                use_container_width=True,
-                height=500,
-                selection_mode="single-row",
-                hide_index=True
+            # ✅ FIXED: Use column selection, not dataframe selection
+            selected_idx = st.selectbox(
+                "Select occurrence:",
+                options=range(len(df)),
+                format_func=lambda i: f"{df.iloc[i]['Ticker']} - {df.iloc[i]['Pattern']} ({df.iloc[i]['Date']})"
             )
             
-            if selected_rows is not None and len(selected_rows) > 0:
-                selected_idx = selected_rows.index[0]
-                selected_data = filtered_df.iloc[selected_idx]
+            if selected_idx is not None:
+                selected_data = df.iloc[selected_idx]
                 
                 ticker = selected_data['Ticker']
                 pattern_date = selected_data['Date']
-                matched_patterns = [col for col in selected_patterns if selected_data.get(col, False)]
-                pattern_name = ", ".join(matched_patterns) if matched_patterns else "Multiple"
+                pattern_name = selected_data['Pattern']
                 
                 st.markdown("---")
                 st.subheader(f"📊 {ticker}: **{pattern_name}** on {pattern_date}")
@@ -1014,13 +1019,12 @@ def page_historical_analysis():
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("📈 Prior Price Trend", selected_data.get('PriorTrend', 'N/A'))
+                    st.metric("📈 Prior Price Trend", selected_data['PriorTrend'])
                 with col2:
-                    st.metric("📊 Prior Volume Trend", selected_data.get('PriorVolume', 'N/A'))
+                    st.metric("📊 Prior Volume Trend", selected_data['PriorVolume'])
     else:
-        st.info("👆 Setup → **Start Historical Analysis** → Click row")
-
-           
+        st.info("👆 Setup → **Start Historical Analysis** → Select occurrence")
+          
 
 def page_screener():
     st.title("📈 Road to Runway")
