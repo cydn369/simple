@@ -610,24 +610,24 @@ def apply_screener_coloring(df):
     
     # Bullish pattern columns (green when True)
     bullish_patterns = [
-        'BullishMarubozu', 'Hammer', 'InvertedHammer', 'BullishEngulfing', 'MorningStar',
-        'PiercingLine', 'RisingThreeMethods', 'ThreeInsideUp', 'BullishTasukiGap',
-        'MatHold', 'ThreeWhiteSoldiers', 'RisingWindow', 'BullishSeparatingLines'
+        'Bullish_Marubozu', 'Hammer', 'Inverted_Hammer', 'Bullish_Engulfing', 'Morning_Star',
+        'Piercing_Line', 'Rising_Three_Methods', 'Three_Inside_Up', 'Bullish_Tasuki_Gap',
+        'Mat_Hold', 'Three_White_Soldiers', 'Rising_Window', 'Bullish_Separating_Lines'
     ]
     
     # Bearish pattern columns (red when True)
     bearish_patterns = [
-        'BearishMarubozu', 'BearishEngulfing', 'EveningStar', 'DarkCloudCover',
-        'ThreeInsideDown', 'BearishTasukiGap', 'ThreeBlackCrows', 'FallingWindow',
-        'BearishSeparatingLines', 'UpsideGapTwoCrows', 'OnNeck', 'InNeck'
+        'Bearish_Marubozu', 'Bearish_Engulfing', 'Evening_Star', 'Dark_Cloud_Cover',
+        'Three_Inside_Down', 'Bearish_Tasuki_Gap', 'Three_Black_Crows', 'Falling_Window',
+        'Bearish_Separating_Lines', 'Upside_Gap_Two_Crows', 'On_Neck', 'In_Neck'
     ]
     
     # Technical indicators (bullish green, bearish red)
-    bullish_tech = ['RSIOversold', 'MACDBullish', 'GoldenCross', 'BollingerBreakout', 'VolumeSpike']
-    bearish_tech = ['RSIOverbought', 'MACDBearish', 'DeathCross', 'BollingerBreakdown']
+    bullish_tech = ['RSI_Oversold', 'MACD_Bullish', 'Golden_Cross', 'Bollinger_Breakout', 'Volume_Spike']
+    bearish_tech = ['RSI_Overbought', 'MACD_Bearish', 'Death_Cross', 'Bollinger_Breakdown']
     
     # Financial filters (green when condition met)
-    financial_green = ['PELt20', 'DividendYieldGt2', 'DebtEquityLt1']
+    financial_green = ['PE_Lt_20', 'DividendYield_Gt_2', 'DebtEquity_Lt_1']
     
     def color_bullish_patterns(val):
         """Green background for True bullish signals"""
