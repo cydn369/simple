@@ -1,4 +1,4 @@
-import os
+import o s
 from datetime import datetime, timedelta
 import streamlit as st
 import yfinance as yf
