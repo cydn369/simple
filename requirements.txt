@@ -5,3 +5,8 @@ requests
 yfinance
 plotly
 streamlit-aggrid
+streamlit
+openpyxl
+TA-Lib
+xlsxwriter
+plotly
