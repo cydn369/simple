@@ -7,6 +7,11 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from io import BytesIO
+import base64
+from data_utils import load_tickers as ha_load_tickers, get_data
+from indicators import calculate_all_indicators, find_indicator_occurrences
+from chart_viewer import display_signal_chart
 
 # ======================================
 # Load Nifty tickers from local files
@@ -44,6 +49,158 @@ def prior_volume_trend(volumes, lookback=10):
     recent = volumes.iloc[-lookback:].mean()
     prior = volumes.iloc[-2 * lookback:-lookback].mean()
     return "Increasing" if recent > prior else "Decreasing"
+
+# ======================================
+# Historical Analysis page
+# ======================================
+
+def ha_to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Indicator Results')
+    return output.getvalue()
+
+
+def ha_get_download_link(data, filename, text):
+    b64 = base64.b64encode(data).decode()
+    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}">{text}</a>'
+    return href
+
+
+def ha_run_analysis_and_store(selected_tickers, start_date, end_date):
+    st.session_state.setdefault('ha_analysis_ran', False)
+    st.session_state.setdefault('ha_results_df', pd.DataFrame())
+
+    st.session_state['ha_analysis_ran'] = True
+    all_results = []
+
+    my_bar = st.progress(0, text="Starting analysis...")
+
+    for i, ticker in enumerate(selected_tickers):
+        my_bar.progress((i + 1) / len(selected_tickers), text=f"Analyzing {ticker}...")
+
+        data = get_data(ticker, start_date, end_date)
+
+        if data is not None and not data.empty:
+            data_with_indicators = calculate_all_indicators(data.copy())
+            ticker_results = find_indicator_occurrences(data_with_indicators, ticker)
+            all_results.extend(ticker_results)
+        else:
+            st.warning(f"Could not retrieve data for **{ticker}** in the selected period.")
+
+    my_bar.empty()
+    st.success("Analysis Complete!")
+
+    if all_results:
+        results_df = pd.DataFrame(all_results)
+        results_df['Occurence Date'] = pd.to_datetime(results_df['Occurence Date'])
+        results_df = results_df.sort_values(
+            by=['Occurence Date', 'Ticker Name'],
+            ascending=False
+        ).reset_index(drop=True)
+        st.session_state['ha_results_df'] = results_df
+    else:
+        st.session_state['ha_results_df'] = pd.DataFrame()
+
+
+def page_historical_analysis():
+    st.title("📜 Historical Analysis")
+
+    # Session init for this page
+    if 'ha_analysis_ran' not in st.session_state:
+        st.session_state['ha_analysis_ran'] = False
+    if 'ha_results_df' not in st.session_state:
+        st.session_state['ha_results_df'] = pd.DataFrame()
+
+    # 1. Ticker selection
+    st.subheader("1. Select Tickers")
+    tickers = ha_load_tickers()
+    default_ticker = tickers[0] if tickers else None
+    selected_tickers = st.multiselect(
+        "Select Tickers",
+        options=tickers,
+        default=default_ticker,
+        help="Select one or more stock tickers from the list."
+    )
+
+    # 2. Date range
+    st.subheader("2. Select Period")
+    col1, col2 = st.columns(2)
+    with col1:
+        today = date.today()
+        start_date = st.date_input("From Date", today - timedelta(days=365), key="ha_from")
+    with col2:
+        end_date = st.date_input("To Date", today, key="ha_to")
+
+    if start_date >= end_date:
+        st.error("Error: 'From Date' must be before 'To Date'.")
+        return
+
+    # 3. Info
+    st.subheader("3. Indicators Being Tracked")
+    st.info("The logic is managed in `indicators.py` with complex, multi-factor analysis.")
+
+    # Run button
+    if st.button("Run Historical Analysis", type="primary"):
+        if not selected_tickers:
+            st.warning("Please select at least one ticker to run the analysis.")
+        else:
+            ha_run_analysis_and_store(selected_tickers, start_date, end_date)
+
+    # 4. Results
+    if st.session_state['ha_analysis_ran'] and not st.session_state['ha_results_df'].empty:
+        results_df = st.session_state['ha_results_df']
+
+        st.subheader("4. Indicator Occurrence Results")
+
+        st.markdown("**🔍 Filter by Indicators** (select multiple)")
+        all_indicators = sorted(results_df['Indicator'].unique())
+
+        selected_indicators = st.multiselect(
+            "Choose indicators to show:",
+            options=all_indicators,
+            default=all_indicators,
+            key="ha_indicator_filter"
+        )
+
+        if selected_indicators:
+            filtered_results = results_df[results_df['Indicator'].isin(selected_indicators)]
+        else:
+            filtered_results = results_df.copy()
+
+        filter_count = len(filtered_results)
+        total_count = len(results_df)
+        st.caption(f"Showing **{filter_count}** of **{total_count}** total signals")
+
+        selected_rows = st.dataframe(
+            filtered_results,
+            use_container_width=True,
+            key="ha_results_table_filtered",
+            on_select="rerun",
+            selection_mode="single-row"
+        )
+
+        if selected_rows.get('selection', {}).get('rows'):
+            selected_index = selected_rows['selection']['rows'][0]
+            selected_row_data = filtered_results.iloc[selected_index].to_dict()
+            display_signal_chart(selected_row_data)
+
+        # Export
+        st.subheader("5. Export Results")
+        if not filtered_results.empty:
+            from datetime import date as _date_for_name
+            excel_data = ha_to_excel(filtered_results)
+            st.markdown(
+                ha_get_download_link(
+                    excel_data,
+                    f"Filtered_Results_{_date_for_name.today().strftime('%Y%m%d')}.xlsx",
+                    f"📥 **Download Filtered Results ({filter_count} signals)**"
+                ),
+                unsafe_allow_html=True
+            )
+        else:
+            st.info("👆 Select indicators above to see results.")
+
 # ======================================
 # Chart indicators (candlestick patterns)
 # ======================================
@@ -1177,11 +1334,17 @@ def page_paper_trading():
 
 st.set_page_config(page_title="Road to Runway", layout="wide")
 
-page = st.sidebar.selectbox("Select page:", ["Dashboard", "Screener", "Paper Trading"])
+page = st.sidebar.selectbox(
+    "Select page:",
+    ["Dashboard", "Screener", "Historical Analysis", "Paper Trading"]
+)
 
 if page == "Screener":
     page_screener()
 elif page == "Dashboard":
     page_dashboard()
+elif page == "Historical Analysis":
+    page_historical_analysis()
 elif page == "Paper Trading":
     page_paper_trading()
+
